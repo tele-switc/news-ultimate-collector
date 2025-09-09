@@ -16,7 +16,6 @@ function fmtDate(iso){
   catch { return d.toLocaleString("zh-CN",{hour12:false}); }
 }
 
-// 极简黑色图标
 const ICONS = {
   read: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h7a4 4 0 0 1 4 4v10H8a4 4 0 0 0-4 4V5z"/><path d="M11 5h7a4 4 0 0 1 4 4v10h-7"/></svg>`,
   ext: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v7H3V3h7"/></svg>`
@@ -82,10 +81,9 @@ function buildCard(it){
     <div class="summary">${escapeHtml(it.summary||"")}</div>
     <div class="actions">${readBtn} ${openBtn}</div>
   `;
-  // 整卡点击打开阅读器；外链按钮不拦截
   div.addEventListener("click", (e)=>{
     const a = e.target.closest("a");
-    if(a && !a.dataset.action) return;
+    if(a && !a.dataset.action) return; // 外链不拦截
     e.preventDefault();
     openReader(it);
   });
@@ -155,22 +153,4 @@ function openReader(it){
   } else if(it.content_text){
     it.content_text.split(/\n{2,}/).forEach(p=>{ const el=document.createElement("p"); el.textContent=p.trim(); body.appendChild(el); });
   } else {
-    body.innerHTML=`<p class="meta">该页面未提供可公开提取的全文，请点击“原文”。</p>`;
-  }
-}
-
-function bindUI(){
-  document.getElementById("q").addEventListener("input", e=>{ state.query = e.target.value || ""; renderList(); });
-  bindReader();
-}
-
-(async function(){
-  bindUI();
-  try{
-    await loadIndex();
-    await rebuildFilters();
-    await renderList();
-  }catch(e){
-    document.getElementById("list").innerHTML=`<div class="card"><div class="meta">数据尚未生成。请先运行 Backfill 或 Daily。</div></div>`;
-  }
-})();
+    body.innerHTML=`<p 
