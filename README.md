@@ -1,0 +1,1 @@
+# news-ultimate-collector
