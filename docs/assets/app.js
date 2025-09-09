@@ -153,4 +153,42 @@ function openReader(it){
   } else if(it.content_text){
     it.content_text.split(/\n{2,}/).forEach(p=>{ const el=document.createElement("p"); el.textContent=p.trim(); body.appendChild(el); });
   } else {
-    body.innerHTML=`<p 
+    body.innerHTML=`<p class="meta">该页面未提供可公开提取的全文，请点击“原文”。</p>`;
+  }
+}
+
+/* 主题切换 */
+function applyTheme(t){
+  document.documentElement.setAttribute("data-theme", t);
+  const btn = document.getElementById("themeToggle");
+  if(btn) btn.textContent = (t === "dark") ? "☀︎" : "🌙";
+}
+function initTheme(){
+  const t = localStorage.getItem("theme") || "light";
+  applyTheme(t);
+}
+function toggleTheme(){
+  const cur = document.documentElement.getAttribute("data-theme") || "light";
+  const next = (cur === "dark") ? "light" : "dark";
+  localStorage.setItem("theme", next);
+  applyTheme(next);
+}
+
+function bindUI(){
+  document.getElementById("q").addEventListener("input", e=>{ state.query = e.target.value || ""; renderList(); });
+  const themeBtn = document.getElementById("themeToggle");
+  if(themeBtn) themeBtn.addEventListener("click", toggleTheme);
+  initTheme();
+  bindReader();
+}
+
+(async function(){
+  bindUI();
+  try{
+    await loadIndex();
+    await rebuildFilters();
+    await renderList();
+  }catch(e){
+    document.getElementById("list").innerHTML=`<div class="card"><div class="meta">数据尚未生成。请先运行 Backfill 或 Daily。</div></div>`;
+  }
+})();
