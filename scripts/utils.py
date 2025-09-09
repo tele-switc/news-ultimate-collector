@@ -11,7 +11,7 @@ INDEX_FILE = os.path.join(DATA_ROOT, "index.json")
 DEDUP_FILE = os.path.join(DATA_ROOT, "dedup.json")
 
 HEADERS = {
-    "User-Agent": "NewsPortalBot/1.4 (+https://github.com/) requests",
+    "User-Agent": "NewsPortalBot/1.5 (+https://github.com/) requests",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/rss+xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.8",
 }
@@ -211,7 +211,6 @@ def extract_meta(url, timeout=18):
     except Exception:
         return {}
 
-# 读取站点 Sitemap（返回 (url, lastmod_iso)）
 def collect_from_sitemap_index(base_url, start_iso, end_iso, polite_delay=0.6):
     from xml.etree import ElementTree as ET
     start = dtparser.parse(start_iso); end = dtparser.parse(end_iso)
