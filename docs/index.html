@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>外刊聚合 · 科技精选</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <link href="./assets/styles.css" rel="stylesheet">
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <div class="logo"></div>
+      <div class="titles">
+        <h1>外刊聚合 · 科技精选</h1>
+        <p class="sub">每天 08:00（北京时间）自动更新 · 小卡片 · 圆形按钮 · 黑色极简图标</p>
+      </div>
+    </div>
+    <div class="generated">
+      <span id="lastUpdated">—</span>
+    </div>
+  </header>
+
+  <section class="controls">
+    <div class="filters" id="filters"></div>
+    <div class="searchbar"><input id="q" type="search" placeholder="搜索 标题 / 摘要 / 作者（英文）…"></div>
+    <div class="months"><select id="monthSelect"></select></div>
+  </section>
+
+  <main id="list" class="grid">
+    <div class="skeletons" id="skeletons"></div>
+  </main>
+
+  <footer class="site-footer">
+    <p>当页面可公开访问或许可允许时展示全文；受限内容不绕过限制，点击原文阅读。版权归出版方/作者所有。</p>
+  </footer>
+
+  <!-- 阅读器 Modal -->
+  <div id="reader" class="reader hidden" aria-hidden="true">
+    <div class="reader__backdrop"></div>
+    <div class="reader__panel">
+      <button class="reader__close" aria-label="关闭" title="关闭">×</button>
+      <article class="reader__content">
+        <h2 id="rd-title"></h2>
+        <div id="rd-meta" class="meta"></div>
+        <div id="rd-actions" class="actions"></div>
+        <div id="rd-body" class="article"></div>
+      </article>
+    </div>
+  </div>
+
+  <script src="./assets/app.js"></script>
+</body>
+</html>
