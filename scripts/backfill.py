@@ -25,14 +25,19 @@ def try_fill_fulltext(item):
     return item
 
 def main():
-    start_iso = os.getenv("BACKFILL_START", START_DATE_ISO + "T00:00:00Z")
-    end_iso = os.getenv("BACKFILL_END", to_iso(datetime.now(timezone.utc)))
-    dedup = load_dedup()
+    # 关键修复：环境变量可能是空字符串，需回退到默认
+    start_raw = (os.getenv("BACKFILL_START") or "").strip()
+    end_raw   = (os.getenv("BACKFILL_END") or "").strip()
+    start_iso = start_raw if start_raw else START_DATE_ISO + "T00:00:00Z"
+    end_iso   = end_raw   if end_raw   else to_iso(datetime.now(timezone.utc))
 
+    dedup = load_dedup()
     added = 0
+
     for key, conf in SOURCES.items():
         base = conf.get("sitemap")
-        if not base: continue
+        if not base: 
+            continue
         print(f"[{conf['display_name']}] Sitemap backfill: {base}")
         rows = collect_from_sitemap_index(base, start_iso, end_iso, polite_delay=0.6)
         print(f"  URLs in range: {len(rows)}")
@@ -44,7 +49,8 @@ def main():
             updated = meta.get("updated_at","")
             item = make_item(url, title, conf["display_name"], published, None, author, updated)
             item = try_fill_fulltext(item)
-            if add_item_if_new(dedup, item): added += 1
+            if add_item_if_new(dedup, item):
+                added += 1
             time.sleep(0.18)
 
     save_dedup(dedup)
