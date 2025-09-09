@@ -1,0 +1,35 @@
+name: Daily fetch (CST 08:00 + fallbacks)
+
+on:
+  schedule:
+    - cron: "0 0 * * *"   # 北京时间 08:00
+    - cron: "10 0 * * *"  # 08:10
+    - cron: "20 0 * * *"  # 08:20
+    - cron: "30 0 * * *"  # 08:30
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-fetch
+  cancel-in-progress: true
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Run daily fetch
+        run: python scripts/fetch_daily.py
+      - name: Commit and push
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(daily): update aggregated data"
+          branch: main
