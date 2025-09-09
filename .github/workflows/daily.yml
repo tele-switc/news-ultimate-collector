@@ -26,8 +26,8 @@ jobs:
           python-version: "3.11"
       - name: Install deps
         run: pip install -r requirements.txt
-      - name: Run daily fetch
-        run: python scripts/fetch_daily.py
+      - name: Run daily fetch (module mode)
+        run: python -m scripts.fetch_daily
       - name: Commit and push
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
