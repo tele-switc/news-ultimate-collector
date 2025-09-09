@@ -1,0 +1,35 @@
+name: Backfill (Sitemap + local fulltext)
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_date: { description: "ISO start (default 2025-01-01T00:00:00Z)", required: false }
+      end_date:   { description: "ISO end (default now)", required: false }
+
+permissions:
+  contents: write
+
+concurrency:
+  group: backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    env:
+      BACKFILL_START: ${{ inputs.start_date }}
+      BACKFILL_END: ${{ inputs.end_date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Run backfill (module mode)
+        run: python -m scripts.backfill
+      - name: Commit and push
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(backfill): add historical items"
+          branch: main
