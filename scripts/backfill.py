@@ -1,21 +1,36 @@
 # -*- coding: utf-8 -*-
-import os, sys, time
+import os, sys, time, json
 from datetime import datetime, timezone
+from dateutil import parser as dtparser
+
 from scripts.config import SOURCES, START_DATE_ISO
 from scripts.utils import (
     collect_from_sitemap_index, extract_meta, load_dedup, save_dedup,
-    add_item_if_new, make_item, to_iso, update_index_indexfile
+    add_item_if_new, make_item, to_iso, update_index_indexfile,
+    ensure_dir
 )
 from scripts.connectors.fulltext import extract_fulltext
+
+STATE_FILE = os.path.join("docs", "data", "backfill_state.json")
+
+# 环境参数（有默认，避免超时）
+MAX_MONTHS_PER_RUN = int(os.getenv("MAX_MONTHS_PER_RUN", "2"))                  # 每次跑几个月
+MAX_URLS_PER_SOURCE_PER_MONTH = int(os.getenv("MAX_URLS_PER_SOURCE_PER_MONTH", "150"))  # 每个来源每月最多处理多少URL
+POLITE_DELAY = float(os.getenv("BACKFILL_DELAY", "0.18"))
 
 def try_fill_fulltext(item):
     try:
         data = extract_fulltext(item["url"])
-        if not data: return item
-        if data.get("title"): item["title"] = item["title"] or data["title"]
-        if data.get("author"): item["author"] = item["author"] or data["author"]
-        if data.get("published_at"): item["published_at"] = data["published_at"]
-        if data.get("updated_at"): item["updated_at"] = data["updated_at"]
+        if not data:
+            return item
+        if data.get("title"):
+            item["title"] = item["title"] or data["title"]
+        if data.get("author"):
+            item["author"] = item["author"] or data["author"]
+        if data.get("published_at"):
+            item["published_at"] = data["published_at"]
+        if data.get("updated_at"):
+            item["updated_at"] = data["updated_at"]
         item["content_text"] = data.get("content_text") or ""
         item["content_html"] = data.get("content_html") or ""
         if item["content_text"] or item["content_html"]:
@@ -24,24 +39,108 @@ def try_fill_fulltext(item):
         print(f"Fulltext extract failed: {e}")
     return item
 
+def month_list(start_dt, end_dt):
+    y, m = start_dt.year, start_dt.month
+    while True:
+        cur = datetime(y, m, 1, tzinfo=timezone.utc)
+        if cur > end_dt:
+            break
+        yield (y, m)
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return None
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def save_state(state):
+    ensure_dir(os.path.dirname(STATE_FILE))
+    tmp = STATE_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, STATE_FILE)
+
 def main():
-    # 关键修复：环境变量可能是空字符串，需回退到默认
+    # 安全解析时间区间（空值回退默认）
     start_raw = (os.getenv("BACKFILL_START") or "").strip()
     end_raw   = (os.getenv("BACKFILL_END") or "").strip()
     start_iso = start_raw if start_raw else START_DATE_ISO + "T00:00:00Z"
     end_iso   = end_raw   if end_raw   else to_iso(datetime.now(timezone.utc))
 
-    dedup = load_dedup()
-    added = 0
+    start_dt = dtparser.parse(start_iso)
+    end_dt   = dtparser.parse(end_iso)
 
-    for key, conf in SOURCES.items():
-        base = conf.get("sitemap")
-        if not base: 
+    # 载入/初始化进度
+    state = load_state()
+    sources_keys = list(SOURCES.keys())
+    months = list(month_list(start_dt, end_dt))
+
+    if not months:
+        print("No months to backfill in given range.")
+        return 0
+
+    def new_state():
+        return {
+            "start_iso": start_iso,
+            "end_iso": end_iso,
+            "source_idx": 0,
+            "month_idx": 0,
+            "complete": False
+        }
+
+    # 如果状态不存在，或时间区间变了，则重置
+    if (not state) or (state.get("start_iso") != start_iso) or (state.get("end_iso") != end_iso):
+        state = new_state()
+
+    if state.get("complete"):
+        print("Backfill already complete for the given range.")
+        return 0
+
+    source_idx = int(state.get("source_idx", 0))
+    month_idx  = int(state.get("month_idx", 0))
+
+    dedup = load_dedup()
+    added_total = 0
+    months_processed_this_run = 0
+
+    while source_idx < len(sources_keys) and months_processed_this_run < MAX_MONTHS_PER_RUN:
+        skey = sources_keys[source_idx]
+        conf = SOURCES[skey]
+        sitemap = conf.get("sitemap")
+        if not sitemap:
+            # 跳过无 sitemap 的来源
+            source_idx += 1
+            month_idx = 0
             continue
-        print(f"[{conf['display_name']}] Sitemap backfill: {base}")
-        rows = collect_from_sitemap_index(base, start_iso, end_iso, polite_delay=0.6)
-        print(f"  URLs in range: {len(rows)}")
-        for (url, lastmod_iso) in rows:
+
+        if month_idx >= len(months):
+            # 当前来源完成，转下一个来源
+            source_idx += 1
+            month_idx = 0
+            continue
+
+        y, m = months[month_idx]
+        month_start = datetime(y, m, 1, tzinfo=timezone.utc)
+        if m == 12:
+            month_end = datetime(y+1, 1, 1, tzinfo=timezone.utc)
+        else:
+            month_end = datetime(y, m+1, 1, tzinfo=timezone.utc)
+        month_start_iso = to_iso(month_start)
+        month_end_iso   = to_iso(month_end)
+
+        print(f"[{conf['display_name']}] Backfill {y}-{m:02d} via sitemap: {sitemap}")
+        rows = collect_from_sitemap_index(sitemap, month_start_iso, month_end_iso, polite_delay=0.5)
+        print(f"  URLs in month: {len(rows)} (limit {MAX_URLS_PER_SOURCE_PER_MONTH})")
+        processed = 0
+
+        for (url, lastmod_iso) in rows[:MAX_URLS_PER_SOURCE_PER_MONTH]:
             meta = extract_meta(url)
             title = meta.get("title","") or conf["display_name"]
             author = meta.get("author","")
@@ -50,12 +149,38 @@ def main():
             item = make_item(url, title, conf["display_name"], published, None, author, updated)
             item = try_fill_fulltext(item)
             if add_item_if_new(dedup, item):
-                added += 1
-            time.sleep(0.18)
+                added_total += 1
+            processed += 1
+            time.sleep(POLITE_DELAY)
+
+        # 本月处理完，推进指针，保存进度（断点可续）
+        month_idx += 1
+        months_processed_this_run += 1
+        state.update({
+            "start_iso": start_iso,
+            "end_iso": end_iso,
+            "source_idx": source_idx,
+            "month_idx": month_idx,
+            "complete": False
+        })
+        save_state(state)
+
+        print(f"  Done {y}-{m:02d}: processed={processed}, added_total={added_total}")
+
+        # 若该来源所有月份已完成，进入下一来源
+        if month_idx >= len(months):
+            source_idx += 1
+            month_idx = 0
+
+    # 若所有来源都完成，标记完成
+    if source_idx >= len(sources_keys):
+        state.update({"complete": True})
+        save_state(state)
+        print("Backfill fully complete for the given range.")
 
     save_dedup(dedup)
     update_index_indexfile()
-    print(f"Backfill done. New items added: {added}")
+    print(f"Backfill chunk done. New items added this run: {added_total}")
     return 0
 
 if __name__ == "__main__":
