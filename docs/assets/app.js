@@ -26,11 +26,10 @@ async function loadIndex(){
   const r = await fetch("./data/index.json",{cache:"no-store"});
   if(!r.ok) throw new Error("index.json not found");
   state.index = await r.json();
-  const gen = state.index.generated_at;
-  if(gen){
+  if(state.index.generated_at){
     const el=document.getElementById("lastUpdated");
-    try { el.textContent = `数据生成于：${new Date(gen).toLocaleString("zh-CN",{hour12:false,timeZone:"Asia/Shanghai"})}`; }
-    catch { el.textContent = `数据生成于：${new Date(gen).toLocaleString("zh-CN",{hour12:false})}`; }
+    try { el.textContent = new Date(state.index.generated_at).toLocaleString("zh-CN",{hour12:false,timeZone:"Asia/Shanghai"}); }
+    catch { el.textContent = new Date(state.index.generated_at).toLocaleString("zh-CN",{hour12:false}); }
   }
   state.months = state.index.months || [];
   state.selectedMonth = state.months[state.months.length-1];
@@ -58,7 +57,7 @@ async function loadMonthData(monthKey){
   return data;
 }
 
-function showSkeleton(n=12){
+function showSkeleton(n=10){
   const box=document.getElementById("skeletons");
   box.innerHTML="";
   for(let i=0;i<n;i++){
@@ -70,7 +69,7 @@ function showSkeleton(n=12){
 function hideSkeleton(){ document.getElementById("skeletons").innerHTML=""; }
 
 function buildCard(it){
-  const div=document.createElement("div"); 
+  const div=document.createElement("div");
   div.className="card";
   div.dataset.id = it.id;
   const by = it.author ? `<span class="byline">${escapeHtml(it.author)}</span>` : "";
@@ -114,7 +113,7 @@ async function rebuildFilters(){
 }
 
 async function renderList(){
-  showSkeleton(12);
+  showSkeleton(10);
   const list=document.getElementById("list");
   const data=await loadMonthData(state.selectedMonth);
   const q=(state.query||"").trim().toLowerCase();
@@ -128,7 +127,7 @@ async function renderList(){
   hideSkeleton();
   list.querySelectorAll(".card").forEach(n=>n.remove());
   if(filtered.length===0){
-    const empty=document.createElement("div"); empty.className="card"; empty.innerHTML=`<div class="meta">没有匹配结果</div>`;
+    const empty=document.createElement("div"); empty.className="card"; empty.innerHTML=`<div class="meta">没有结果</div>`;
     list.appendChild(empty); return;
   }
   filtered.forEach(it=>list.appendChild(buildCard(it)));
@@ -156,7 +155,7 @@ function openReader(it){
   } else if(it.content_text){
     it.content_text.split(/\n{2,}/).forEach(p=>{ const el=document.createElement("p"); el.textContent=p.trim(); body.appendChild(el); });
   } else {
-    body.innerHTML=`<p class="meta">该页面未提供可公开提取的全文，请点击“原文”阅读。</p>`;
+    body.innerHTML=`<p class="meta">该页面未提供可公开提取的全文，请点击“原文”。</p>`;
   }
 }
 
