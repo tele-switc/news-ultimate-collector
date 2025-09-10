@@ -9,7 +9,7 @@ on:
         description: "ISO start (默认 2025-01-01T00:00:00Z)"
         required: false
       end_date:
-        description: "ISO end (默认现在)"
+        description: "ISO end (默认现在，后续运行若未传则沿用上次)"
         required: false
       reset:
         description: "重置进度: true/false"
@@ -34,21 +34,19 @@ concurrency:
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 45
     env:
       BACKFILL_START: ${{ inputs.start_date }}
-      BACKFILL_END: ${{ inputs.end_date }}
-      # 给输入设置默认值，避免传入空字符串
-      MAX_MONTHS_PER_RUN: ${{ inputs.max_months || 2 }}
-      MAX_URLS_PER_SOURCE_PER_MONTH: ${{ inputs.max_urls || 150 }}
-      BACKFILL_DELAY: ${{ inputs.delay || 0.18 }}
+      BACKFILL_END:   ${{ inputs.end_date }}
+      MAX_MONTHS_PER_RUN:               ${{ inputs.max_months || 2 }}
+      MAX_URLS_PER_SOURCE_PER_MONTH:    ${{ inputs.max_urls   || 150 }}
+      BACKFILL_DELAY:                   ${{ inputs.delay      || 0.18 }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Reset state if requested
         if: ${{ inputs.reset == 'true' }}
-        run: |
-          rm -f docs/data/backfill_state.json || true
+        run: rm -f docs/data/backfill_state.json || true
 
       - uses: actions/setup-python@v5
         with:
