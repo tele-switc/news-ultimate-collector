@@ -20,27 +20,19 @@ DEFAULT_BACKFILL_DELAY = 0.18
 
 def getenv_int(name, default):
     v = os.getenv(name)
-    if v is None:
-        return default
+    if v is None: return default
     v = str(v).strip()
-    if v == "":
-        return default
-    try:
-        return int(v)
-    except Exception:
-        return default
+    if not v: return default
+    try: return int(v)
+    except: return default
 
 def getenv_float(name, default):
     v = os.getenv(name)
-    if v is None:
-        return default
+    if v is None: return default
     v = str(v).strip()
-    if v == "":
-        return default
-    try:
-        return float(v)
-    except Exception:
-        return default
+    if not v: return default
+    try: return float(v)
+    except: return default
 
 # 环境参数（健壮解析）
 MAX_MONTHS_PER_RUN = getenv_int("MAX_MONTHS_PER_RUN", DEFAULT_MAX_MONTHS_PER_RUN)
@@ -50,16 +42,11 @@ POLITE_DELAY = getenv_float("BACKFILL_DELAY", DEFAULT_BACKFILL_DELAY)
 def try_fill_fulltext(item):
     try:
         data = extract_fulltext(item["url"])
-        if not data:
-            return item
-        if data.get("title"):
-            item["title"] = item["title"] or data["title"]
-        if data.get("author"):
-            item["author"] = item["author"] or data["author"]
-        if data.get("published_at"):
-            item["published_at"] = data["published_at"]
-        if data.get("updated_at"):
-            item["updated_at"] = data["updated_at"]
+        if not data: return item
+        if data.get("title"): item["title"] = item["title"] or data["title"]
+        if data.get("author"): item["author"] = item["author"] or data["author"]
+        if data.get("published_at"): item["published_at"] = data["published_at"]
+        if data.get("updated_at"): item["updated_at"] = data["updated_at"]
         item["content_text"] = data.get("content_text") or ""
         item["content_html"] = data.get("content_html") or ""
         if item["content_text"] or item["content_html"]:
@@ -72,17 +59,13 @@ def month_list(start_dt, end_dt):
     y, m = start_dt.year, start_dt.month
     while True:
         cur = datetime(y, m, 1, tzinfo=timezone.utc)
-        if cur > end_dt:
-            break
+        if cur > end_dt: break
         yield (y, m)
         m += 1
-        if m > 12:
-            m = 1
-            y += 1
+        if m > 12: m = 1; y += 1
 
 def load_state():
-    if not os.path.exists(STATE_FILE):
-        return None
+    if not os.path.exists(STATE_FILE): return None
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -97,26 +80,30 @@ def save_state(state):
     os.replace(tmp, STATE_FILE)
 
 def main():
-    # 安全解析时间区间（空值回退默认）
+    # 先读旧状态
+    old_state = load_state()
+
+    # 解析时间区间（输入为空则优先沿用旧区间，保证不被“now”打断）
     start_raw = (os.getenv("BACKFILL_START") or "").strip()
     end_raw   = (os.getenv("BACKFILL_END") or "").strip()
-    start_iso = start_raw if start_raw else START_DATE_ISO + "T00:00:00Z"
-    end_iso   = end_raw   if end_raw   else to_iso(datetime.now(timezone.utc))
+    start_iso = start_raw or (old_state.get("start_iso") if old_state else "") or (START_DATE_ISO + "T00:00:00Z")
+    end_iso   = end_raw   or (old_state.get("end_iso")   if old_state else "") or to_iso(datetime.now(timezone.utc))
 
     start_dt = dtparser.parse(start_iso)
     end_dt   = dtparser.parse(end_iso)
 
-    # 载入/初始化进度
-    state = load_state()
-    sources_keys = list(SOURCES.keys())
-    months = list(month_list(start_dt, end_dt))
+    # 初始或沿用进度
+    state = old_state or {
+        "start_iso": start_iso,
+        "end_iso": end_iso,
+        "source_idx": 0,
+        "month_idx": 0,
+        "complete": False
+    }
 
-    if not months:
-        print("No months to backfill in given range.")
-        return 0
-
-    def new_state():
-        return {
+    # 如果手动输入了新的时间区间，与旧值不同则重置进度
+    if (start_raw and start_iso != state.get("start_iso")) or (end_raw and end_iso != state.get("end_iso")):
+        state = {
             "start_iso": start_iso,
             "end_iso": end_iso,
             "source_idx": 0,
@@ -124,12 +111,14 @@ def main():
             "complete": False
         }
 
-    # 如果状态不存在，或时间区间变了，则重置
-    if (not state) or (state.get("start_iso") != start_iso) or (state.get("end_iso") != end_iso):
-        state = new_state()
-
     if state.get("complete"):
         print("Backfill already complete for the given range.")
+        return 0
+
+    sources_keys = list(SOURCES.keys())
+    months = list(month_list(start_dt, end_dt))
+    if not months:
+        print("No months to backfill in given range.")
         return 0
 
     source_idx = int(state.get("source_idx", 0))
@@ -144,13 +133,11 @@ def main():
         conf = SOURCES[skey]
         sitemap = conf.get("sitemap")
         if not sitemap:
-            # 跳过无 sitemap 的来源
             source_idx += 1
             month_idx = 0
             continue
 
         if month_idx >= len(months):
-            # 当前来源完成，转下一个来源
             source_idx += 1
             month_idx = 0
             continue
@@ -165,7 +152,10 @@ def main():
         month_end_iso   = to_iso(month_end)
 
         print(f"[{conf['display_name']}] Backfill {y}-{m:02d} via sitemap: {sitemap}")
-        rows = collect_from_sitemap_index(sitemap, month_start_iso, month_end_iso, polite_delay=0.5) or []
+        rows = collect_from_sitemap_index(
+            sitemap, month_start_iso, month_end_iso,
+            polite_delay=0.5, include_no_lastmod=True
+        ) or []
         print(f"  URLs in month: {len(rows)} (limit {MAX_URLS_PER_SOURCE_PER_MONTH})")
         processed = 0
 
@@ -182,12 +172,11 @@ def main():
             processed += 1
             time.sleep(POLITE_DELAY)
 
-        # 本月处理完，推进指针，保存进度（断点可续）
         month_idx += 1
         months_processed_this_run += 1
         state.update({
             "start_iso": start_iso,
-            "end_iso": end_iso,
+            "end_iso": end_iso,   # 固定本次区间，不随“now”漂移
             "source_idx": source_idx,
             "month_idx": month_idx,
             "complete": False
@@ -196,12 +185,10 @@ def main():
 
         print(f"  Done {y}-{m:02d}: processed={processed}, added_total={added_total}")
 
-        # 若该来源所有月份已完成，进入下一来源
         if month_idx >= len(months):
             source_idx += 1
             month_idx = 0
 
-    # 若所有来源都完成，标记完成
     if source_idx >= len(sources_keys):
         state.update({"complete": True})
         save_state(state)
