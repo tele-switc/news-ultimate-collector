@@ -1,10 +1,16 @@
 # -*- coding: utf-8 -*-
+"""
+全文抽取（本地解析，不绕过付费墙）：
+- trafilatura: 结构化元数据 + 纯文本
+- readability: 清洁 HTML（保留图片）
+- transform_content_html: 绝对化图片/链接、懒加载、安全清理
+"""
 import json
 from readability import Document
 from bs4 import BeautifulSoup
 from dateutil import parser as dtparser
 from datetime import datetime, timezone
-from scripts.utils import http_get
+from scripts.utils import http_get, to_iso, transform_content_html
 
 def _to_iso(dt):
     if not dt: return ""
@@ -17,11 +23,9 @@ def _to_iso(dt):
     return d.astimezone(timezone.utc).isoformat()
 
 def extract_fulltext(url: str, timeout: int = 45):
-    """
-    本地解析（trafilatura + readability），仅在页面本身可访问时提取正文。
-    不绕过付费墙/登录；不可访问则返回空。
-    """
-    r = http_get(url, headers={"Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}, timeout=timeout)
+    r = http_get(url, headers={
+        "Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    }, timeout=timeout)
     if "text/html" not in r.headers.get("Content-Type","").lower():
         return {}
 
@@ -35,29 +39,31 @@ def extract_fulltext(url: str, timeout: int = 45):
         j = trafilatura.extract(html, output_format="json", favor_recall=True, include_comments=False, url=url)
         if j:
             data = json.loads(j)
-            text_plain = (data.get("text") or "").strip()
-            meta_title = (data.get("title") or "").strip()
+            text_plain  = (data.get("text") or "").strip()
+            meta_title  = (data.get("title") or "").strip()
             meta_author = (data.get("author") or "").strip()
-            meta_date = _to_iso(data.get("date"))
+            meta_date   = _to_iso(data.get("date"))
     except Exception:
         pass
 
-    # 2) readability（清洁 HTML）
+    # 2) readability（清洁 HTML，包含图片）
     content_html = ""
     try:
         doc = Document(html)
-        content_html = doc.summary()
+        content_html = doc.summary() or ""
         if not meta_title:
             meta_title = (doc.short_title() or "").strip()
     except Exception:
         pass
 
-    # 3) 清理 HTML（去 script/style/iframe）
+    # 3) HTML 规范化：绝对化图片/链接、懒加载、安全清理（保留媒体）
     if content_html:
+        content_html = transform_content_html(content_html, url)
+
+    # 若没拿到纯文本，基于 HTML 辅助生成
+    if not text_plain and content_html:
         try:
-            soup = BeautifulSoup(content_html, "html.parser")
-            for t in soup(["script","style","noscript","iframe"]): t.decompose()
-            content_html = str(soup)
+            text_plain = BeautifulSoup(content_html, "html.parser").get_text("\n").strip()
         except Exception:
             pass
 
