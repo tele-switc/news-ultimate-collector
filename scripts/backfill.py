@@ -13,10 +13,39 @@ from scripts.connectors.fulltext import extract_fulltext
 
 STATE_FILE = os.path.join("docs", "data", "backfill_state.json")
 
-# 环境参数（有默认，避免超时）
-MAX_MONTHS_PER_RUN = int(os.getenv("MAX_MONTHS_PER_RUN", "2"))                  # 每次跑几个月
-MAX_URLS_PER_SOURCE_PER_MONTH = int(os.getenv("MAX_URLS_PER_SOURCE_PER_MONTH", "150"))  # 每个来源每月最多处理多少URL
-POLITE_DELAY = float(os.getenv("BACKFILL_DELAY", "0.18"))
+# 默认参数
+DEFAULT_MAX_MONTHS_PER_RUN = 2
+DEFAULT_MAX_URLS_PER_SOURCE_PER_MONTH = 150
+DEFAULT_BACKFILL_DELAY = 0.18
+
+def getenv_int(name, default):
+    v = os.getenv(name)
+    if v is None:
+        return default
+    v = str(v).strip()
+    if v == "":
+        return default
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+def getenv_float(name, default):
+    v = os.getenv(name)
+    if v is None:
+        return default
+    v = str(v).strip()
+    if v == "":
+        return default
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+# 环境参数（健壮解析）
+MAX_MONTHS_PER_RUN = getenv_int("MAX_MONTHS_PER_RUN", DEFAULT_MAX_MONTHS_PER_RUN)
+MAX_URLS_PER_SOURCE_PER_MONTH = getenv_int("MAX_URLS_PER_SOURCE_PER_MONTH", DEFAULT_MAX_URLS_PER_SOURCE_PER_MONTH)
+POLITE_DELAY = getenv_float("BACKFILL_DELAY", DEFAULT_BACKFILL_DELAY)
 
 def try_fill_fulltext(item):
     try:
@@ -136,7 +165,7 @@ def main():
         month_end_iso   = to_iso(month_end)
 
         print(f"[{conf['display_name']}] Backfill {y}-{m:02d} via sitemap: {sitemap}")
-        rows = collect_from_sitemap_index(sitemap, month_start_iso, month_end_iso, polite_delay=0.5)
+        rows = collect_from_sitemap_index(sitemap, month_start_iso, month_end_iso, polite_delay=0.5) or []
         print(f"  URLs in month: {len(rows)} (limit {MAX_URLS_PER_SOURCE_PER_MONTH})")
         processed = 0
 
