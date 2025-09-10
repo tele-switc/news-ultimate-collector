@@ -1,9 +1,8 @@
 name: Backfill (chunked + resume)
 
 on:
-  # 每天一次自动滚动补历史（可保留，也可只手动触发）
   schedule:
-    - cron: "40 0 * * *"   # 08:40 CST
+    - cron: "40 0 * * *"   # 08:40 CST 自动滚动补历史
   workflow_dispatch:
     inputs:
       start_date:
@@ -21,6 +20,9 @@ on:
       max_urls:
         description: "每来源每月最多URL(默认150)"
         required: false
+      delay:
+        description: "每条礼貌延时秒(默认0.18)"
+        required: false
 
 permissions:
   contents: write
@@ -36,8 +38,10 @@ jobs:
     env:
       BACKFILL_START: ${{ inputs.start_date }}
       BACKFILL_END: ${{ inputs.end_date }}
-      MAX_MONTHS_PER_RUN: ${{ inputs.max_months }}
-      MAX_URLS_PER_SOURCE_PER_MONTH: ${{ inputs.max_urls }}
+      # 给输入设置默认值，避免传入空字符串
+      MAX_MONTHS_PER_RUN: ${{ inputs.max_months || 2 }}
+      MAX_URLS_PER_SOURCE_PER_MONTH: ${{ inputs.max_urls || 150 }}
+      BACKFILL_DELAY: ${{ inputs.delay || 0.18 }}
     steps:
       - uses: actions/checkout@v4
 
