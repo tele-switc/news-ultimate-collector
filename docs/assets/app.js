@@ -16,9 +16,13 @@ function fmtDate(iso){
   catch { return d.toLocaleString("zh-CN",{hour12:false}); }
 }
 
+// 纯描边黑/白图标（继承 currentColor）
 const ICONS = {
   read: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h7a4 4 0 0 1 4 4v10H8a4 4 0 0 0-4 4V5z"/><path d="M11 5h7a4 4 0 0 1 4 4v10h-7"/></svg>`,
-  ext: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v7H3V3h7"/></svg>`
+  ext:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v7H3V3h7"/></svg>`,
+  search:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>`,
+  calendar:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
+  filter:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16l-6 7v5l-4 2v-7z"/></svg>`
 };
 
 async function loadIndex(){
@@ -52,7 +56,7 @@ async function loadMonthData(monthKey){
   const [y,m]=monthKey.split("-");
   const r=await fetch(`./data/${y}/${m}.json`,{cache:"no-store"});
   const data=r.ok? await r.json(): [];
-  state.cache[monthKey]=data; 
+  state.cache[monthKey]=data;
   return data;
 }
 
@@ -71,21 +75,30 @@ function buildCard(it){
   const div=document.createElement("div");
   div.className="card";
   div.dataset.id = it.id;
+
   const by = it.author ? `<span class="byline">${escapeHtml(it.author)}</span>` : "";
-  const meta = `${by}${by?" · ":""}${escapeHtml(fmtDate(it.published_at))} · ${escapeHtml(it.source)}`;
+  const meta = `
+    <span>${by}${by?" · ":""}${escapeHtml(fmtDate(it.published_at))}</span>
+    <span class="tag">${escapeHtml(it.source)}</span>
+  `;
+
   const readBtn = `<a href="#" class="btn-circle" data-action="read" title="站内阅读">${ICONS.read}</a>`;
   const openBtn = `<a class="btn-circle" href="${it.url}" target="_blank" rel="noopener noreferrer" title="原文">${ICONS.ext}</a>`;
+
   div.innerHTML = `
     <h3>${escapeHtml(it.title)}</h3>
     <div class="meta">${meta}</div>
-    <div class="summary">${escapeHtml(it.summary||"")}</div>
+    <div class="summary"></div>
     <div class="actions">${readBtn} ${openBtn}</div>
   `;
+
   div.addEventListener("click", (e)=>{
     const a = e.target.closest("a");
     if(a && !a.dataset.action) return; // 外链不拦截
     e.preventDefault();
-    openReader(it);
+    const hasContent = !!(it.content_html || it.content_text);
+    if(hasContent){ openReader(it); }
+    else { window.open(it.url, "_blank", "noopener,noreferrer"); }
   });
   return div;
 }
@@ -119,7 +132,7 @@ async function renderList(){
     .filter(it=> state.selectedSources.size===0 || state.selectedSources.has(it.source))
     .filter(it=>{
       if(!q) return true;
-      const hay=(it.title+" "+(it.summary||"")+" "+(it.author||"")).toLowerCase();
+      const hay=(it.title+" "+(it.author||"")).toLowerCase();
       return hay.includes(q);
     });
   hideSkeleton();
@@ -131,6 +144,7 @@ async function renderList(){
   filtered.forEach(it=>list.appendChild(buildCard(it)));
 }
 
+/* 阅读器 */
 function bindReader(){
   const reader=document.getElementById("reader");
   reader.querySelector(".reader__backdrop").addEventListener("click", closeReader);
@@ -157,7 +171,7 @@ function openReader(it){
   }
 }
 
-/* 主题切换 */
+/* 主题切换（持久化） */
 function applyTheme(t){
   document.documentElement.setAttribute("data-theme", t);
   const btn = document.getElementById("themeToggle");
@@ -174,12 +188,70 @@ function toggleTheme(){
   applyTheme(next);
 }
 
+/* Header 阴影随滚动增强 */
+function bindHeaderShadow(){
+  const hdr = document.getElementById("hdr");
+  const onScroll = () => {
+    if(window.scrollY > 6) hdr.classList.add("scrolled");
+    else hdr.classList.remove("scrolled");
+  };
+  onScroll();
+  window.addEventListener("scroll", onScroll, { passive:true });
+}
+
+/* 搜索/清空/图标注入/筛选折叠 */
+function injectControlIcons(){
+  const iconSearch = document.getElementById("iconSearch");
+  const iconCalendar = document.getElementById("iconCalendar");
+  const filtersToggle = document.getElementById("filtersToggle");
+  if(iconSearch) iconSearch.innerHTML = ICONS.search;
+  if(iconCalendar) iconCalendar.innerHTML = ICONS.calendar;
+  if(filtersToggle) filtersToggle.innerHTML = ICONS.filter;
+}
+
+function bindControlsUtilities(){
+  // 清空搜索
+  const input = document.getElementById("q");
+  const clear = document.getElementById("clearSearch");
+  const updateClear = ()=>{
+    const has = !!(input.value && input.value.trim());
+    clear.style.opacity = has ? "1" : ".35";
+    clear.style.pointerEvents = has ? "auto" : "none";
+  };
+  input.addEventListener("input", ()=>{
+    state.query = input.value || "";
+    updateClear();
+    renderList();
+  });
+  clear.addEventListener("click", (e)=>{
+    e.preventDefault();
+    input.value = "";
+    state.query = "";
+    updateClear();
+    renderList();
+    input.focus();
+  });
+  updateClear();
+
+  // 筛选折叠/展开
+  const toggle = document.getElementById("filtersToggle");
+  const filters = document.getElementById("filters");
+  if(window.innerWidth < 820) filters.classList.add("collapsed");
+  if(toggle){
+    toggle.addEventListener("click", ()=>{
+      filters.classList.toggle("collapsed");
+    });
+  }
+}
+
 function bindUI(){
-  document.getElementById("q").addEventListener("input", e=>{ state.query = e.target.value || ""; renderList(); });
   const themeBtn = document.getElementById("themeToggle");
   if(themeBtn) themeBtn.addEventListener("click", toggleTheme);
   initTheme();
+  bindHeaderShadow();
   bindReader();
+  injectControlIcons();
+  bindControlsUtilities();
 }
 
 (async function(){
