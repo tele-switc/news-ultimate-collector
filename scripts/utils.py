@@ -7,6 +7,7 @@ utils.py
 - HTTP GET（重试/退避）
 - RSS/HTML 元数据提取
 - Sitemap 解析（含无 lastmod 的日期启发式）
+- HTML 规范化：图片/链接绝对化、懒加载、安全清理（保留媒体）
 """
 
 import os
@@ -16,7 +17,7 @@ import time
 import hashlib
 import gzip
 from datetime import datetime, timezone, timedelta
-from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode, urljoin
 from dateutil import parser as dtparser
 import requests
 from bs4 import BeautifulSoup
@@ -28,7 +29,7 @@ DEDUP_FILE = os.path.join(DATA_ROOT, "dedup.json")
 
 # HTTP 请求默认头
 HEADERS = {
-    "User-Agent": "NewsPortalBot/1.5 (+https://github.com/) requests",
+    "User-Agent": "NewsPortalBot/1.6 (+https://github.com/) requests",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/rss+xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.8",
 }
@@ -56,7 +57,7 @@ def load_json(path: str, default):
 
 def save_json(path: str, obj):
     ensure_dir(os.path.dirname(path))
-    tmp = path + ".tmp"
+    tmp = path + "..tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
@@ -303,6 +304,73 @@ def extract_meta(url: str, timeout=18):
         return extract_meta_from_html(r.text)
     except Exception:
         return {}
+
+# HTML 规范化：保留媒体、绝对化 img/src/href、懒加载
+def transform_content_html(html_text: str, base_url: str) -> str:
+    """
+    - 保留图片/figure/figcaption
+    - 去 script/style/iframe/noscript
+    - 统一 a[href] 与 img[src] 为绝对 URL
+    - 兼容 data-src/data-original/srcset，尽量补齐 img.src
+    - 图片懒加载（loading=lazy），链接加安全属性
+    """
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    # 清理危险标签
+    for t in soup(["script", "style", "noscript", "iframe"]):
+        t.decompose()
+
+    # 修正图片
+    for img in soup.find_all("img"):
+        # 各种懒加载属性归并到 src
+        for k in ["data-src", "data-original", "data-lazy-src", "data-ks-lazyload", "data-image"]:
+            if not img.get("src") and img.get(k):
+                img["src"] = img.get(k)
+        # 若有 srcset，取最大一项
+        if not img.get("src") and img.get("srcset"):
+            try:
+                candidates = [c.strip() for c in img["srcset"].split(",")]
+                # 取最后一项通常是最大
+                img["src"] = candidates[-1].split()[0]
+            except Exception:
+                pass
+        # 绝对化
+        if img.get("src"):
+            img["src"] = urljoin(base_url, img["src"])
+        # 常用属性
+        img["loading"] = img.get("loading") or "lazy"
+        img.attrs.pop("onload", None)
+        img.attrs.pop("onclick", None)
+
+    # 修正 <source srcset>（<picture>里）
+    for src in soup.find_all("source"):
+        if src.get("srcset"):
+            parts = []
+            for seg in src["srcset"].split(","):
+                p = seg.strip().split()
+                if not p:
+                    continue
+                absu = urljoin(base_url, p[0])
+                if len(p) == 2:
+                    parts.append(f"{absu} {p[1]}")
+                else:
+                    parts.append(absu)
+            if parts:
+                src["srcset"] = ", ".join(parts)
+
+    # 链接绝对化与安全属性
+    for a in soup.find_all("a"):
+        href = a.get("href")
+        if href:
+            a["href"] = urljoin(base_url, href)
+            a["target"] = "_blank"
+            a["rel"] = "noopener noreferrer"
+
+        # 去 inline 事件
+        for attr in list(a.attrs.keys()):
+            if attr.lower().startswith("on"):
+                a.attrs.pop(attr, None)
+
+    return str(soup)
 
 # Sitemap 解析（含无 lastmod 的路径日期启发式）
 def collect_from_sitemap_index(base_url, start_iso, end_iso, polite_delay=0.6, include_no_lastmod=True):
