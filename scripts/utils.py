@@ -39,9 +39,10 @@ RETRY_STATUS = {429, 500, 502, 503, 504}
 
 # 跟踪参数（从 URL query 中剔除）
 TRACKING_PARAMS = {
-    "utm_source","utm_medium","utm_campaign","utm_term","utm_content","utm_id",
-    "mbid","partner","ncid","cmpid","icid","ref","refsrc","oref","_hsmi","_hsenc",
-    "fbclid","gclid","smid","emc","share","s_cid","sref","rss","output","mod","algo","variant"
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+    "mbid", "partner", "ncid", "cmpid", "icid", "ref", "refsrc", "oref", "_hsmi", "_hsenc",
+    "fbclid", "gclid", "smid", "emc", "share", "s_cid", "sref", "rss", "output", "mod",
+    "algo", "variant"
 }
 
 # 基础文件/目录操作
@@ -80,8 +81,10 @@ def canonicalize_url(u: str) -> str:
         netloc = re.sub(r"^(m|amp|www)\.", "", parts.netloc.lower())
         path = re.sub(r"/+$", "", parts.path)
         path = re.sub(r"/amp/?$", "", path).replace("/amp/", "/")
-        q = [(k, v) for (k, v) in parse_qsl(parts.query, keep_blank_values=True)
-             if k.lower() not in TRACKING_PARAMS and v.lower() != "amp"]
+        q = [
+            (k, v) for (k, v) in parse_qsl(parts.query, keep_blank_values=True)
+            if k.lower() not in TRACKING_PARAMS and v.lower() != "amp"
+        ]
         query = urlencode(q, doseq=True)
         return urlunparse((scheme, netloc, path, "", query, ""))
     except Exception:
@@ -107,7 +110,7 @@ def load_month(year: int, month: int):
 
 def save_month(year: int, month: int, items):
     path = monthly_file(year, month)
-    items_sorted = sorted(items, key=lambda x: x.get("published_at",""), reverse=True)
+    items_sorted = sorted(items, key=lambda x: x.get("published_at", ""), reverse=True)
     save_json(path, items_sorted)
 
 def load_dedup():
@@ -125,7 +128,7 @@ def update_index_indexfile():
         if not os.path.isdir(ydir):
             continue
         for m in sorted(os.listdir(ydir)):
-            if not m.endswith(".json"): 
+            if not m.endswith(".json"):
                 continue
             path = os.path.join(ydir, m)
             try:
@@ -133,7 +136,11 @@ def update_index_indexfile():
                 months[f"{y}-{m[:-5]}"] = len(data)
             except Exception:
                 pass
-    index = {"months": sorted(months.keys()), "counts": months, "generated_at": to_iso(datetime.now(timezone.utc))}
+    index = {
+        "months": sorted(months.keys()),
+        "counts": months,
+        "generated_at": to_iso(datetime.now(timezone.utc)),
+    }
     save_json(INDEX_FILE, index)
 
 def add_item_if_new(dedup_set, item):
@@ -162,6 +169,7 @@ def make_item(url, title, source, published_at_iso, summary=None, author=None, u
         "lang": "en",
         "content_text": "",
         "content_html": "",
+        "cover_image": "",
         "can_publish_fulltext": False,
     }
 
@@ -179,18 +187,24 @@ def http_get(url, headers=None, timeout=25, max_retries=3, backoff=1.6):
             if r.status_code in RETRY_STATUS:
                 ra = r.headers.get("Retry-After")
                 if ra:
-                    try: delay = max(delay, float(ra))
-                    except Exception: pass
+                    try:
+                        delay = max(delay, float(ra))
+                    except Exception:
+                        pass
                 last_exc = Exception(f"HTTP {r.status_code}")
                 if attempt < max_retries:
-                    time.sleep(delay); delay *= backoff; continue
+                    time.sleep(delay)
+                    delay *= backoff
+                    continue
                 r.raise_for_status()
             r.raise_for_status()
             return r
         except Exception as e:
             last_exc = e
             if attempt < max_retries:
-                time.sleep(delay); delay *= backoff; continue
+                time.sleep(delay)
+                delay *= backoff
+                continue
             raise last_exc
 
 def parse_xml(content_bytes: bytes) -> str:
@@ -232,16 +246,20 @@ def _from_ld_json(soup):
             t = obj.get("@type") or ""
             if isinstance(t, list):
                 t = ",".join(t)
-            if any(x in str(t) for x in ["NewsArticle","Article","Report","BlogPosting"]):
+            if any(x in str(t) for x in ["NewsArticle", "Article", "Report", "BlogPosting"]):
                 ap = obj.get("author")
                 if isinstance(ap, dict):
-                    n = ap.get("name");  n and authors.append(n)
+                    n = ap.get("name")
+                    n and authors.append(n)
                 elif isinstance(ap, list):
                     for a in ap:
                         if isinstance(a, dict):
-                            n = a.get("name"); n and authors.append(n)
-                if not published: published = obj.get("datePublished")
-                if not modified: modified = obj.get("dateModified")
+                            n = a.get("name")
+                            n and authors.append(n)
+                if not published:
+                    published = obj.get("datePublished")
+                if not modified:
+                    modified = obj.get("dateModified")
                 if authors or published or modified:
                     return (authors, published, modified)
     return (authors, published, modified)
@@ -249,17 +267,25 @@ def _from_ld_json(soup):
 def extract_meta_from_html(html_text: str):
     soup = BeautifulSoup(html_text, "html.parser")
     # 标题
-    title = _first_meta(soup, props=["og:title","twitter:title"]) or (soup.title.string.strip() if soup.title and soup.title.string else None)
+    title = _first_meta(soup, props=["og:title", "twitter:title"]) or (
+        soup.title.string.strip() if soup.title and soup.title.string else None
+    )
     # 作者
-    author = _first_meta(soup, names=["author","byl","byline"], props=["article:author"])
+    author = _first_meta(soup, names=["author", "byl", "byline"], props=["article:author"])
     ld_authors, ld_pub, ld_mod = _from_ld_json(soup)
     if not author and ld_authors:
         author = ", ".join(dict.fromkeys([a.strip() for a in ld_authors if a and isinstance(a, str)]))
     if author:
         author = re.sub(r"^\s*by\s+", "", author, flags=re.I).strip()
+
     # 时间
-    published = _first_meta(soup, props=["article:published_time"]) or _first_meta(soup, names=["pubdate","publishdate","date","ptime","DC.date.issued"]) or ld_pub
-    modified  = _first_meta(soup, props=["article:modified_time"]) or ld_mod
+    published = (
+        _first_meta(soup, props=["article:published_time"])
+        or _first_meta(soup, names=["pubdate", "publishdate", "date", "ptime", "DC.date.issued"])
+        or ld_pub
+    )
+    modified = _first_meta(soup, props=["article:modified_time"]) or ld_mod
+
     return {
         "title": title or "",
         "author": author or "",
@@ -269,23 +295,16 @@ def extract_meta_from_html(html_text: str):
 
 def extract_meta(url: str, timeout=18):
     try:
-        r = http_get(url, headers={"Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}, timeout=timeout)
-        if "text/html" not in r.headers.get("Content-Type","").lower(): return {}
+        r = http_get(
+            url,
+            headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
+            timeout=timeout,
+        )
+        if "text/html" not in r.headers.get("Content-Type", "").lower():
+            return {}
         return extract_meta_from_html(r.text)
     except Exception:
         return {}
-
-# 提取 og:image（绝对 URL）
-def extract_og_image_src(page_html: str, base_url: str) -> str:
-    try:
-        soup = BeautifulSoup(page_html or "", "html.parser")
-        for key in ["og:image","twitter:image","image"]:
-            el = soup.find("meta", attrs={"property": key}) or soup.find("meta", attrs={"name": key})
-            if el and el.get("content"):
-                return urljoin(base_url, el["content"].strip())
-    except Exception:
-        pass
-    return ""
 
 # HTML 规范化：保留媒体、绝对化 img/src/href、懒加载
 def transform_content_html(html_text: str, base_url: str) -> str:
@@ -298,16 +317,16 @@ def transform_content_html(html_text: str, base_url: str) -> str:
     """
     soup = BeautifulSoup(html_text or "", "html.parser")
     # 清理危险标签
-    for t in soup(["script","style","noscript","iframe"]):
+    for t in soup(["script", "style", "noscript", "iframe"]):
         t.decompose()
 
     # 修正图片
     for img in soup.find_all("img"):
-        # 把各种懒加载属性归并到 src
-        for k in ["data-src","data-original","data-lazy-src","data-ks-lazyload","data-image"]:
+        # 懒加载归并
+        for k in ["data-src", "data-original", "data-lazy-src", "data-ks-lazyload", "data-image"]:
             if not img.get("src") and img.get(k):
                 img["src"] = img.get(k)
-        # 若有 srcset，取最后一项(通常最大)
+        # 若有 srcset，取最大一项
         if not img.get("src") and img.get("srcset"):
             try:
                 candidates = [c.strip() for c in img["srcset"].split(",")]
@@ -327,10 +346,12 @@ def transform_content_html(html_text: str, base_url: str) -> str:
             parts = []
             for seg in src["srcset"].split(","):
                 p = seg.strip().split()
-                if not p: continue
+                if not p:
+                    continue
                 absu = urljoin(base_url, p[0])
-                parts.append(f"{absu} {p[1]}" if len(p)==2 else absu)
-            if parts: src["srcset"] = ", ".join(parts)
+                parts.append(absu if len(p) == 1 else f"{absu} {p[1]}")
+            if parts:
+                src["srcset"] = ", ".join(parts)
 
     # 链接绝对化与安全属性
     for a in soup.find_all("a"):
@@ -339,7 +360,6 @@ def transform_content_html(html_text: str, base_url: str) -> str:
             a["href"] = urljoin(base_url, href)
             a["target"] = "_blank"
             a["rel"] = "noopener noreferrer"
-        # 去 inline 事件
         for attr in list(a.attrs.keys()):
             if attr.lower().startswith("on"):
                 a.attrs.pop(attr, None)
@@ -359,7 +379,6 @@ def collect_from_sitemap_index(base_url, start_iso, end_iso, polite_delay=0.6, i
     start = dtparser.parse(start_iso)
     end = dtparser.parse(end_iso)
 
-    # 获取 sitemap 索引或直接 sitemap
     try:
         idx_resp = http_get(base_url, timeout=40)
     except Exception as e:
@@ -373,18 +392,19 @@ def collect_from_sitemap_index(base_url, start_iso, end_iso, polite_delay=0.6, i
         print(f"Parse sitemap index failed: {base_url} - {e}")
         return []
 
-    ns = {"sm":"http://www.sitemaps.org/schemas/sitemap/0.9"}
+    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
     sitemap_nodes = root.findall(".//sm:sitemap", ns)
     children = []
 
     if sitemap_nodes:
         for sm in sitemap_nodes:
             loc_el = sm.find("sm:loc", ns)
-            lm_el  = sm.find("sm:lastmod", ns)
-            if loc_el is None or not loc_el.text: 
+            lm_el = sm.find("sm:lastmod", ns)
+            if loc_el is None or not loc_el.text:
                 continue
             loc = loc_el.text.strip()
-            # 子索引粗过滤（±40 天）
+
+            # 子索引粗过滤：±40 天缓冲
             if lm_el is not None and lm_el.text:
                 try:
                     lm = dtparser.parse(lm_el.text.strip())
@@ -406,24 +426,25 @@ def collect_from_sitemap_index(base_url, start_iso, end_iso, polite_delay=0.6, i
         except Exception as e:
             print(f"Fetch sitemap child failed: {child} - {e}")
             continue
+
         try:
-            croot = ET.fromstring(parse_xml(r.content))
+            croot = BeautifulSoup(parse_xml(r.content), "xml")
         except Exception as e:
             print(f"Parse child sitemap failed: {child} - {e}")
             continue
 
-        for u in croot.findall(".//{http://www.sitemaps.org/schemas/sitemap/0.9}url"):
-            loc_el = u.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")
-            lm_el  = u.find("{http://www.sitemaps.org/schemas/sitemap/0.9}lastmod")
-            if loc_el is None or not loc_el.text: 
+        for u in croot.find_all("url"):
+            loc_el = u.find("loc")
+            lm_el = u.find("lastmod")
+            if loc_el is None or not loc_el.text:
                 continue
             loc = loc_el.text.strip()
-            if loc in seen: 
+            if loc in seen:
                 continue
             seen.add(loc)
 
             used_dt = None
-            # 优先 lastmod
+
             if lm_el is not None and lm_el.text:
                 try:
                     dtv = dtparser.parse(lm_el.text.strip())
@@ -432,7 +453,6 @@ def collect_from_sitemap_index(base_url, start_iso, end_iso, polite_delay=0.6, i
                 except Exception:
                     pass
 
-            # 无 lastmod 或不在区间，用路径日期启发式
             if used_dt is None and include_no_lastmod:
                 m = date_pat.search(loc)
                 if m:
