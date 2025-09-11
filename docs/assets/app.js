@@ -2,7 +2,8 @@ const state = {
   index:null, months:[], selectedMonth:null,
   availableSources:[], selectedSources:new Set(),
   cache:{}, query:"",
-  page:1, pageSize:6
+  page:1, pageSize:12,       // 小卡片每页更多一些
+  currentList:[], currentIdx:-1
 };
 
 function escapeHtml(s){
@@ -17,13 +18,6 @@ function fmtDate(iso){
   catch { return d.toLocaleString("zh-CN",{hour12:false}); }
 }
 
-// 纯描边图标
-const ICONS = {
-  read: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h7a4 4 0 0 1 4 4v10H8a4 4 0 0 0-4 4V5z"/><path d="M11 5h7a4 4 0 0 1 4 4v10h-7"/></svg>`,
-  ext:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v7H3V3h7"/></svg>`,
-  back: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>`
-};
-
 async function loadIndex(){
   const r = await fetch("./data/index.json",{cache:"no-store"});
   if(!r.ok) throw new Error("index.json not found");
@@ -33,7 +27,7 @@ async function loadIndex(){
     try { el.textContent = new Date(state.index.generated_at).toLocaleString("zh-CN",{hour12:false,timeZone:"Asia/Shanghai"}); }
     catch { el.textContent = new Date(state.index.generated_at).toLocaleString("zh-CN",{hour12:false}); }
   }
-  state.months = (state.index.months || []).sort(); // 保险
+  state.months = (state.index.months || []).sort();
   state.selectedMonth = state.months[state.months.length-1];
   renderMonthOptions();
 }
@@ -55,13 +49,12 @@ async function loadMonthData(monthKey){
   const [y,m]=monthKey.split("-");
   const r=await fetch(`./data/${y}/${m}.json`,{cache:"no-store"});
   const data=r.ok? await r.json(): [];
-  // 再按 published_at 排一次（保险）
   data.sort((a,b)=> (b.published_at||"").localeCompare(a.published_at||""));
   state.cache[monthKey]=data; 
   return data;
 }
 
-function showSkeleton(n=6){
+function showSkeleton(n=12){
   const box=document.getElementById("skeletons");
   box.innerHTML="";
   for(let i=0;i<n;i++){
@@ -72,68 +65,30 @@ function showSkeleton(n=6){
 }
 function hideSkeleton(){ document.getElementById("skeletons").innerHTML=""; }
 
-/* 从 HTML 中提取第一张图作为封面（后备） */
 function firstImageFromHtml(html){
   try{
     const tmp=document.createElement("div"); tmp.innerHTML=html||"";
-    const img=tmp.querySelector("img");
-    return img? img.getAttribute("src") || "" : "";
+    const img=tmp.querySelector("img"); return img? img.getAttribute("src") || "" : "";
   }catch(e){ return ""; }
 }
 
-/* 构建可翻转大卡片 */
-function buildCard(it){
-  const wrap=document.createElement("div");
-  wrap.className="flippable";
+function buildCard(it, idx){
+  const div=document.createElement("div");
+  div.className="card";
   const cover = it.cover_image || (it.content_html ? firstImageFromHtml(it.content_html) : "");
-  const hero = cover ? `<div class="hero"><img src="${escapeHtml(cover)}" alt=""></div>` : "";
-
-  wrap.innerHTML=`
-    <div class="flip-inner">
-      <div class="flip-face flip-front">
-        ${hero}
-        <h3 class="card-title">${escapeHtml(it.title)}</h3>
-        <div class="card-meta">
-          <span>${it.author?escapeHtml(it.author)+" · ":""}${escapeHtml(fmtDate(it.published_at))}</span>
-          <span class="card-tag">${escapeHtml(it.source)}</span>
-        </div>
-        <div class="card-actions">
-          <a href="#" class="btn-circle" data-action="read" title="阅读">${ICONS.read}</a>
-          <a class="btn-circle" href="${it.url}" target="_blank" rel="noopener noreferrer" title="原文">${ICONS.ext}</a>
-        </div>
-      </div>
-      <div class="flip-face flip-back">
-        <div class="back-toolbar">
-          <button class="btn-circle" data-action="back" title="返回">${ICONS.back}</button>
-          <div class="back-meta">${it.author?escapeHtml(it.author)+" · ":""}${escapeHtml(fmtDate(it.published_at))} · ${escapeHtml(it.source)}</div>
-        </div>
-        <h4 class="back-title">${escapeHtml(it.title)}</h4>
-        <div class="back-body"></div>
+  const thumb = cover ? `<div class="card-thumb"><img src="${escapeHtml(cover)}" alt=""></div>` : `<div class="card-thumb"></div>`;
+  div.innerHTML = `
+    ${thumb}
+    <div class="card-body">
+      <h3 class="card-title">${escapeHtml(it.title)}</h3>
+      <div class="card-meta">
+        <span>${it.author?escapeHtml(it.author)+" · ":""}${escapeHtml(fmtDate(it.published_at))}</span>
+        <span class="card-tag">${escapeHtml(it.source)}</span>
       </div>
     </div>
   `;
-
-  const backBody = wrap.querySelector(".back-body");
-  if(it.content_html){
-    const tmp=document.createElement("div");
-    tmp.innerHTML = it.content_html;
-    tmp.querySelectorAll("script,style,noscript").forEach(n=>n.remove());
-    backBody.appendChild(tmp);
-  }else if(it.content_text){
-    it.content_text.split(/\n{2,}/).forEach(p=>{
-      const el=document.createElement("p"); el.textContent=p.trim(); backBody.appendChild(el);
-    });
-  }else{
-    const p = document.createElement("p");
-    p.className="back-meta";
-    p.textContent = "暂无法站内展示全文，请打开原文查看。";
-    backBody.appendChild(p);
-  }
-
-  wrap.querySelector('[data-action="read"]').addEventListener("click",(e)=>{ e.preventDefault(); wrap.classList.add("flipped"); });
-  wrap.querySelector('[data-action="back"]').addEventListener("click",(e)=>{ e.preventDefault(); wrap.classList.remove("flipped"); });
-
-  return wrap;
+  div.addEventListener("click", ()=> openReaderByIndex(idx));
+  return div;
 }
 
 async function rebuildFilters(){
@@ -169,18 +124,24 @@ function renderPager(total, page, pageSize){
 }
 
 async function renderList(){
-  showSkeleton(Math.min(state.pageSize, 6));
+  showSkeleton(Math.min(state.pageSize, 12));
   const list=document.getElementById("list");
   const data=await loadMonthData(state.selectedMonth);
   const q=(state.query||"").trim().toLowerCase();
 
-  let filtered=data
+  const filtered=data
     .filter(it=> state.selectedSources.size===0 || state.selectedSources.has(it.source))
     .filter(it=>{
       if(!q) return true;
       const hay=(it.title+" "+(it.author||"")).toLowerCase();
       return hay.includes(q);
     });
+
+  hideSkeleton();
+  list.innerHTML="";
+
+  state.currentList = filtered;
+  state.currentIdx = -1;
 
   // 分页
   const total = filtered.length;
@@ -189,21 +150,90 @@ async function renderList(){
   const start = (state.page-1)*state.pageSize;
   const pageItems = filtered.slice(start, start+state.pageSize);
 
-  hideSkeleton();
-  list.querySelectorAll(".flippable").forEach(n=>n.remove());
   if(pageItems.length===0){
     const empty=document.createElement("div");
-    empty.className="flippable";
-    empty.innerHTML=`<div class="flip-inner"><div class="flip-face flip-front"><div class="card-meta">没有结果</div></div></div>`;
+    empty.className="card";
+    empty.innerHTML=`<div class="card-body"><div class="card-meta">没有结果</div></div>`;
     list.appendChild(empty);
     renderPager(0, 1, state.pageSize);
     return;
   }
-  pageItems.forEach(it=>list.appendChild(buildCard(it)));
+  pageItems.forEach((it, i)=> list.appendChild(buildCard(it, start+i)));
   renderPager(total, state.page, state.pageSize);
 }
 
-/* 主题切换（持久化）与头部阴影 */
+/* 阅读器（全屏大卡片） */
+function openReaderByIndex(idx){
+  if(idx<0 || idx>=state.currentList.length) return;
+  state.currentIdx = idx;
+  const it = state.currentList[idx];
+
+  const rd = document.getElementById("reader");
+  const title = document.getElementById("rd-title");
+  const meta  = document.getElementById("rd-meta");
+  const source= document.getElementById("rd-source");
+  const stand = document.getElementById("rd-standfirst");
+  const heroW = document.getElementById("rd-hero-wrap");
+  const hero  = document.getElementById("rd-hero");
+  const body  = document.getElementById("rd-body");
+
+  title.textContent = it.title || "";
+  meta.textContent  = `${it.author?it.author+" · ":""}${fmtDate(it.published_at)} · ${it.source}`;
+  source.textContent= it.source || "";
+  stand.textContent = it.summary || "";
+  body.innerHTML = "";
+
+  const cover = it.cover_image || (it.content_html ? firstImageFromHtml(it.content_html) : "");
+  if(cover){
+    hero.src = cover;
+    heroW.hidden = false;
+  }else{
+    hero.src=""; heroW.hidden=true;
+  }
+
+  if(it.content_html){
+    const tmp=document.createElement("div");
+    tmp.innerHTML = it.content_html;
+    tmp.querySelectorAll("script,style,noscript").forEach(n=>n.remove());
+    body.appendChild(tmp);
+  }else if(it.content_text){
+    it.content_text.split(/\n{2,}/).forEach(p=>{
+      const el=document.createElement("p"); el.textContent=p.trim(); body.appendChild(el);
+    });
+  }else{
+    const p=document.createElement("p");
+    p.className="meta"; p.textContent="暂无法站内展示全文，请打开原文查看。";
+    const a=document.createElement("a");
+    a.href=it.url; a.target="_blank"; a.rel="noopener noreferrer"; a.textContent="原文";
+    p.appendChild(document.createTextNode(" "));
+    p.appendChild(a);
+    body.appendChild(p);
+  }
+
+  rd.classList.remove("hidden");
+  document.body.style.overflow="hidden";
+  updateReaderNav();
+}
+
+function closeReader(){
+  const rd = document.getElementById("reader");
+  rd.classList.add("hidden");
+  document.body.style.overflow="";
+  state.currentIdx = -1;
+}
+function updateReaderNav(){
+  const prev = document.getElementById("rd-prev");
+  const next = document.getElementById("rd-next");
+  prev.disabled = (state.currentIdx<=0);
+  next.disabled = (state.currentIdx>=state.currentList.length-1);
+}
+function goReader(delta){
+  const idx = state.currentIdx + delta;
+  if(idx<0 || idx>=state.currentList.length) return;
+  openReaderByIndex(idx);
+}
+
+/* 主题切换（持久化）与 ESC/方向键 */
 function applyTheme(t){
   document.documentElement.setAttribute("data-theme", t);
   const btn = document.getElementById("themeToggle");
@@ -215,18 +245,22 @@ function toggleTheme(){
   const next = (cur === "dark") ? "light" : "dark";
   localStorage.setItem("theme", next); applyTheme(next);
 }
-function bindHeaderShadow(){
-  const hdr = document.getElementById("hdr");
-  const onScroll = ()=>{ if(window.scrollY>6) hdr.classList.add("scrolled"); else hdr.classList.remove("scrolled"); };
-  onScroll(); window.addEventListener("scroll", onScroll, { passive:true });
+function bindKeys(){
+  document.addEventListener("keydown", (e)=>{
+    const rdOpen = !document.getElementById("reader").classList.contains("hidden");
+    if(e.key==="Escape" && rdOpen) closeReader();
+    if(rdOpen && (e.key==="ArrowRight"||e.key==="PageDown")) goReader(1);
+    if(rdOpen && (e.key==="ArrowLeft" ||e.key==="PageUp"))   goReader(-1);
+  });
 }
 
 function bindUI(){
   document.getElementById("q").addEventListener("input", e=>{ state.query = e.target.value || ""; state.page=1; renderList(); });
-  const themeBtn = document.getElementById("themeToggle");
-  if(themeBtn) themeBtn.addEventListener("click", toggleTheme);
-  initTheme();
-  bindHeaderShadow();
+  document.getElementById("themeToggle").addEventListener("click", toggleTheme);
+  document.getElementById("rd-close").addEventListener("click", closeReader);
+  document.getElementById("rd-prev").addEventListener("click", ()=>goReader(-1));
+  document.getElementById("rd-next").addEventListener("click", ()=>goReader(1));
+  initTheme(); bindKeys();
 }
 
 (async function(){
@@ -237,6 +271,6 @@ function bindUI(){
     await renderList();
   }catch(e){
     document.getElementById("list").innerHTML=
-      `<div class="flippable"><div class="flip-inner"><div class="flip-face flip-front"><div class="card-meta">数据尚未生成。请先运行 Backfill 或 Daily。</div></div></div></div>`;
+      `<div class="card"><div class="card-body"><div class="card-meta">数据尚未生成。请先运行 Backfill 或 Daily。</div></div></div>`;
   }
 })();
