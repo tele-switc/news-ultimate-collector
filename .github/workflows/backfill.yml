@@ -1,49 +1,82 @@
-name: Backfill (one-shot 6h)
+name: Backfill (chunked + checkpoint)
 
 on:
+  schedule:
+    - cron: "40 0 * * *"   # 08:40 CST 自动滚动补历史
   workflow_dispatch:
     inputs:
       start_date:
         description: "ISO start (默认 2025-01-01T00:00:00Z)"
         required: false
       end_date:
-        description: "ISO end (默认 now)"
+        description: "ISO end (默认沿用上次，首次为 now)"
+        required: false
+      reset:
+        description: "重置进度: true/false"
+        required: false
+      max_months:
+        description: "每次处理月数(默认2)"
         required: false
       max_urls:
-        description: "每来源每月最多URL(默认300)"
+        description: "每来源每月最多URL(默认150)"
         required: false
       delay:
-        description: "每条礼貌延时秒(默认0.12)"
+        description: "每条礼貌延时秒(默认0.15)"
+        required: false
+      commit_every:
+        description: "每抓多少条 checkpoint 一次(默认120)"
+        required: false
+      time_budget_min:
+        description: "软时间预算(分钟，默认40，应小于timeout)"
+        required: false
+      time_headroom_sec:
+        description: "预留缓冲秒(默认70)"
         required: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: backfill-full
+  group: backfill
   cancel-in-progress: false
 
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 55
     env:
       BACKFILL_START: ${{ inputs.start_date }}
       BACKFILL_END:   ${{ inputs.end_date }}
-      ONE_SHOT: "1"
-      MAX_URLS_PER_SOURCE_PER_MONTH: ${{ inputs.max_urls || 300 }}
-      BACKFILL_DELAY: ${{ inputs.delay || 0.12 }}
+      MAX_MONTHS_PER_RUN:               ${{ inputs.max_months   || 2 }}
+      MAX_URLS_PER_SOURCE_PER_MONTH:    ${{ inputs.max_urls     || 150 }}
+      BACKFILL_DELAY:                   ${{ inputs.delay        || 0.15 }}
+      COMMIT_EVERY:                     ${{ inputs.commit_every || 120 }}
+      TIME_BUDGET_MIN:                  ${{ inputs.time_budget_min   || 40 }}
+      TIME_HEADROOM_SEC:                ${{ inputs.time_headroom_sec || 70 }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Reset state if requested
+        if: ${{ inputs.reset == 'true' }}
+        run: rm -f docs/data/backfill_state.json || true
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install deps
         run: pip install -r requirements.txt
-      - name: Run backfill (one-shot, module mode)
+
+      - name: Run backfill (chunked, checkpoint)
         run: python -m scripts.backfill
-      - name: Commit and push
+
+      # 注意：如果超时，后续步骤不会执行；checkpoint 已在脚本内完成
+      - name: Final commit (best-effort)
+        if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(backfill-one-shot): full pass"
+          commit_message: "chore(backfill): final checkpoint"
           branch: main
