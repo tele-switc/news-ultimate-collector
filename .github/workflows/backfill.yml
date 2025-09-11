@@ -1,65 +1,49 @@
-name: Backfill (chunked + resume)
+name: Backfill (one-shot 6h)
 
 on:
-  schedule:
-    - cron: "40 0 * * *"   # 08:40 CST 自动滚动补历史
   workflow_dispatch:
     inputs:
       start_date:
         description: "ISO start (默认 2025-01-01T00:00:00Z)"
         required: false
       end_date:
-        description: "ISO end (默认现在，后续运行若未传则沿用上次)"
-        required: false
-      reset:
-        description: "重置进度: true/false"
-        required: false
-      max_months:
-        description: "每次处理月数(默认2)"
+        description: "ISO end (默认 now)"
         required: false
       max_urls:
-        description: "每来源每月最多URL(默认150)"
+        description: "每来源每月最多URL(默认300)"
         required: false
       delay:
-        description: "每条礼貌延时秒(默认0.18)"
+        description: "每条礼貌延时秒(默认0.12)"
         required: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: backfill
+  group: backfill-full
   cancel-in-progress: false
 
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 360
     env:
       BACKFILL_START: ${{ inputs.start_date }}
       BACKFILL_END:   ${{ inputs.end_date }}
-      MAX_MONTHS_PER_RUN:               ${{ inputs.max_months || 2 }}
-      MAX_URLS_PER_SOURCE_PER_MONTH:    ${{ inputs.max_urls   || 150 }}
-      BACKFILL_DELAY:                   ${{ inputs.delay      || 0.18 }}
+      ONE_SHOT: "1"
+      MAX_URLS_PER_SOURCE_PER_MONTH: ${{ inputs.max_urls || 300 }}
+      BACKFILL_DELAY: ${{ inputs.delay || 0.12 }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Reset state if requested
-        if: ${{ inputs.reset == 'true' }}
-        run: rm -f docs/data/backfill_state.json || true
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install deps
         run: pip install -r requirements.txt
-
-      - name: Run backfill (chunked, module mode)
+      - name: Run backfill (one-shot, module mode)
         run: python -m scripts.backfill
-
       - name: Commit and push
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(backfill): chunked resume"
+          commit_message: "chore(backfill-one-shot): full pass"
           branch: main
