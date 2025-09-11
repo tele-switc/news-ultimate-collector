@@ -313,7 +313,7 @@ def transform_content_html(html_text: str, base_url: str) -> str:
     - 去 script/style/iframe/noscript
     - 统一 a[href] 与 img[src] 为绝对 URL
     - 兼容 data-src/data-original/srcset，尽量补齐 img.src
-    - 图片懒加载（loading=lazy），链接加安全属性
+    - 图片懒加载（loading=lazy + decoding=async），链接加安全属性
     """
     soup = BeautifulSoup(html_text or "", "html.parser")
     # 清理危险标签
@@ -322,21 +322,19 @@ def transform_content_html(html_text: str, base_url: str) -> str:
 
     # 修正图片
     for img in soup.find_all("img"):
-        # 懒加载归并
         for k in ["data-src", "data-original", "data-lazy-src", "data-ks-lazyload", "data-image"]:
             if not img.get("src") and img.get(k):
                 img["src"] = img.get(k)
-        # 若有 srcset，取最大一项
         if not img.get("src") and img.get("srcset"):
             try:
                 candidates = [c.strip() for c in img["srcset"].split(",")]
                 img["src"] = candidates[-1].split()[0]
             except Exception:
                 pass
-        # 绝对化
         if img.get("src"):
             img["src"] = urljoin(base_url, img["src"])
         img["loading"] = img.get("loading") or "lazy"
+        img["decoding"] = img.get("decoding") or "async"
         img.attrs.pop("onload", None)
         img.attrs.pop("onclick", None)
 
@@ -417,6 +415,7 @@ def collect_from_sitemap_index(base_url, start_iso, end_iso, polite_delay=0.6, i
         children = [base_url]
 
     results, seen = [], set()
+    # 匹配 /2025/09/ 或 /2025-09(-dd)/
     date_pat = re.compile(r"/(20\d{2})(?:[-/])(\d{1,2})(?:[-/](\d{1,2}))?")
 
     for child in children:
@@ -428,6 +427,7 @@ def collect_from_sitemap_index(base_url, start_iso, end_iso, polite_delay=0.6, i
             continue
 
         try:
+            # 用 XML 解析器也可，BeautifulSoup 更宽容
             croot = BeautifulSoup(parse_xml(r.content), "xml")
         except Exception as e:
             print(f"Parse child sitemap failed: {child} - {e}")
@@ -445,6 +445,7 @@ def collect_from_sitemap_index(base_url, start_iso, end_iso, polite_delay=0.6, i
 
             used_dt = None
 
+            # 优先使用 <lastmod>
             if lm_el is not None and lm_el.text:
                 try:
                     dtv = dtparser.parse(lm_el.text.strip())
@@ -453,11 +454,12 @@ def collect_from_sitemap_index(base_url, start_iso, end_iso, polite_delay=0.6, i
                 except Exception:
                     pass
 
+            # 无 lastmod 或 lastmod 不在区间，用路径日期启发式
             if used_dt is None and include_no_lastmod:
                 m = date_pat.search(loc)
                 if m:
                     y, mon, d = int(m.group(1)), int(m.group(2)), m.group(3)
-                    day = int(d) if d and d.isdigit() else 15
+                    day = int(d) if d and d.isdigit() else 15  # 无日取月中
                     try:
                         approx = datetime(y, mon, day, tzinfo=timezone.utc)
                         if start <= approx <= end:
