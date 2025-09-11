@@ -85,6 +85,7 @@ body{
   position:absolute; inset:4vh 3vw; background:var(--card);
   border:1px solid var(--border); border-radius:var(--r-modal); box-shadow:0 16px 48px rgba(2,8,23,.35);
   display:flex; flex-direction:column; overflow:hidden; transform:scale(.98); opacity:0; animation:pop .18s ease forwards;
+  will-change: transform, opacity; /* GPU 加速 */
 }
 @keyframes pop{ to{ transform:scale(1); opacity:1 } }
 
@@ -110,6 +111,20 @@ body{
   float:left; font-size:3.3em; line-height:.9; padding:.08em .12em .08em 0; font-weight:600; color:#111827;
 }
 .article-body img{ max-width:100%; height:auto; border-radius:12px; margin:10px 0 }
+
+/* Skeleton */
+.skel{ background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); padding:18px; box-shadow:var(--shadow) }
+.skel .l{ height:12px; background:linear-gradient(90deg,#eef2f7,#f6f8fc,#eef2f7); background-size:200% 100%; animation:sh 1.2s infinite; opacity:.9; border-radius:6px; margin:10px 0 }
+.skel .t{height:18px; width:80%}
+.skel .m{height:12px; width:50%}
+.skel .s{height:14px; width:100%}
+@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* 动效可达性 */
+@media (prefers-reduced-motion: reduce){
+  .card:hover{ transform:none; box-shadow:var(--shadow) }
+  .reader__panel{ animation:none; transform:none; opacity:1 }
+}
 
 /* 移动端 */
 @media (max-width:860px){
