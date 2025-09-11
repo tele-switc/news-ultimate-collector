@@ -32,9 +32,28 @@
     <button id="nextPage" class="btn-circle" title="下一页">›</button>
   </nav>
 
-  <footer class="site-footer">
-    <p>公开可读或许可允许时展示全文；否则请前往原文。</p>
-  </footer>
+  <!-- 全屏阅读器（杂志风） -->
+  <div id="reader" class="reader hidden" aria-hidden="true">
+    <div class="reader__backdrop"></div>
+    <div class="reader__panel" role="dialog" aria-modal="true" aria-labelledby="rd-title">
+      <button class="reader__close btn-circle" id="rd-close" aria-label="关闭" title="关闭">×</button>
+      <button class="reader__nav btn-circle nav-left" id="rd-prev" aria-label="上一篇" title="上一篇">‹</button>
+      <button class="reader__nav btn-circle nav-right" id="rd-next" aria-label="下一篇" title="下一篇">›</button>
+
+      <article class="reader__content">
+        <header class="article-head">
+          <span class="source-tag" id="rd-source">Source</span>
+          <h2 id="rd-title">Title</h2>
+          <div class="meta" id="rd-meta">Author · Date</div>
+          <p class="standfirst" id="rd-standfirst"></p>
+          <figure class="hero" id="rd-hero-wrap" hidden>
+            <img id="rd-hero" alt="">
+          </figure>
+        </header>
+        <section class="article-body" id="rd-body"></section>
+      </article>
+    </div>
+  </div>
 
   <script src="./assets/app.js"></script>
 </body>
