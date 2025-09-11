@@ -18,43 +18,23 @@
 
   <section class="controls">
     <div class="filters" id="filters"></div>
-
-    <div class="input-wrap">
-      <span class="icon" aria-hidden="true" id="iconSearch"></span>
-      <input id="q" class="search" type="search" placeholder="搜索…" />
-      <button id="clearSearch" class="btn-circle btn-xs clear-btn" aria-label="清空搜索" title="清空搜索">×</button>
-    </div>
-
-    <div class="select-wrap">
-      <span class="icon" aria-hidden="true" id="iconCalendar"></span>
-      <select id="monthSelect" class="month"></select>
-    </div>
-
-    <button id="filtersToggle" class="btn-circle" aria-label="切换筛选" title="切换筛选">
-      <!-- icon 由 JS 注入 -->
-    </button>
+    <input id="q" class="search" type="search" placeholder="搜索…" />
+    <select id="monthSelect" class="month"></select>
   </section>
 
   <main id="list" class="grid">
     <div class="skeletons" id="skeletons"></div>
   </main>
 
+  <nav class="pager" aria-label="分页">
+    <button id="prevPage" class="btn-circle" title="上一页">‹</button>
+    <span id="pageInfo">1 / 1</span>
+    <button id="nextPage" class="btn-circle" title="下一页">›</button>
+  </nav>
+
   <footer class="site-footer">
     <p>公开可读或许可允许时展示全文；否则请前往原文。</p>
   </footer>
-
-  <div id="reader" class="reader hidden" aria-hidden="true">
-    <div class="reader__backdrop"></div>
-    <div class="reader__panel">
-      <button class="reader__close" aria-label="关闭" title="关闭">×</button>
-      <article class="reader__content">
-        <h2 id="rd-title"></h2>
-        <div id="rd-meta" class="meta"></div>
-        <div id="rd-actions" class="actions"></div>
-        <div id="rd-body" class="article"></div>
-      </article>
-    </div>
-  </div>
 
   <script src="./assets/app.js"></script>
 </body>
