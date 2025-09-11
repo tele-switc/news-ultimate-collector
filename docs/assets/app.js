@@ -1,7 +1,8 @@
 const state = {
   index:null, months:[], selectedMonth:null,
   availableSources:[], selectedSources:new Set(),
-  cache:{}, query:""
+  cache:{}, query:"",
+  page:1, pageSize:6
 };
 
 function escapeHtml(s){
@@ -20,10 +21,7 @@ function fmtDate(iso){
 const ICONS = {
   read: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h7a4 4 0 0 1 4 4v10H8a4 4 0 0 0-4 4V5z"/><path d="M11 5h7a4 4 0 0 1 4 4v10h-7"/></svg>`,
   ext:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v7H3V3h7"/></svg>`,
-  search:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>`,
-  calendar:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
-  filter:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16l-6 7v5l-4 2v-7z"/></svg>`,
-  back:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>`
+  back: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>`
 };
 
 async function loadIndex(){
@@ -35,7 +33,7 @@ async function loadIndex(){
     try { el.textContent = new Date(state.index.generated_at).toLocaleString("zh-CN",{hour12:false,timeZone:"Asia/Shanghai"}); }
     catch { el.textContent = new Date(state.index.generated_at).toLocaleString("zh-CN",{hour12:false}); }
   }
-  state.months = state.index.months || [];
+  state.months = (state.index.months || []).sort(); // 保险
   state.selectedMonth = state.months[state.months.length-1];
   renderMonthOptions();
 }
@@ -49,7 +47,7 @@ function renderMonthOptions(){
     sel.appendChild(opt);
   });
   if(state.selectedMonth) sel.value=state.selectedMonth;
-  sel.onchange=async()=>{ state.selectedMonth=sel.value; await rebuildFilters(); renderList(); };
+  sel.onchange=async()=>{ state.selectedMonth=sel.value; state.page=1; await rebuildFilters(); renderList(); };
 }
 
 async function loadMonthData(monthKey){
@@ -57,11 +55,13 @@ async function loadMonthData(monthKey){
   const [y,m]=monthKey.split("-");
   const r=await fetch(`./data/${y}/${m}.json`,{cache:"no-store"});
   const data=r.ok? await r.json(): [];
-  state.cache[monthKey]=data;
+  // 再按 published_at 排一次（保险）
+  data.sort((a,b)=> (b.published_at||"").localeCompare(a.published_at||""));
+  state.cache[monthKey]=data; 
   return data;
 }
 
-function showSkeleton(n=10){
+function showSkeleton(n=6){
   const box=document.getElementById("skeletons");
   box.innerHTML="";
   for(let i=0;i<n;i++){
@@ -72,13 +72,26 @@ function showSkeleton(n=10){
 }
 function hideSkeleton(){ document.getElementById("skeletons").innerHTML=""; }
 
-/* 构建可翻转卡片 */
+/* 从 HTML 中提取第一张图作为封面（后备） */
+function firstImageFromHtml(html){
+  try{
+    const tmp=document.createElement("div"); tmp.innerHTML=html||"";
+    const img=tmp.querySelector("img");
+    return img? img.getAttribute("src") || "" : "";
+  }catch(e){ return ""; }
+}
+
+/* 构建可翻转大卡片 */
 function buildCard(it){
   const wrap=document.createElement("div");
   wrap.className="flippable";
+  const cover = it.cover_image || (it.content_html ? firstImageFromHtml(it.content_html) : "");
+  const hero = cover ? `<div class="hero"><img src="${escapeHtml(cover)}" alt=""></div>` : "";
+
   wrap.innerHTML=`
     <div class="flip-inner">
       <div class="flip-face flip-front">
+        ${hero}
         <h3 class="card-title">${escapeHtml(it.title)}</h3>
         <div class="card-meta">
           <span>${it.author?escapeHtml(it.author)+" · ":""}${escapeHtml(fmtDate(it.published_at))}</span>
@@ -92,49 +105,33 @@ function buildCard(it){
       <div class="flip-face flip-back">
         <div class="back-toolbar">
           <button class="btn-circle" data-action="back" title="返回">${ICONS.back}</button>
-          <div class="back-meta"></div>
+          <div class="back-meta">${it.author?escapeHtml(it.author)+" · ":""}${escapeHtml(fmtDate(it.published_at))} · ${escapeHtml(it.source)}</div>
         </div>
-        <h4 class="back-title"></h4>
+        <h4 class="back-title">${escapeHtml(it.title)}</h4>
         <div class="back-body"></div>
       </div>
     </div>
   `;
 
-  const front = wrap.querySelector(".flip-front");
-  const back  = wrap.querySelector(".flip-back");
-  const inner = wrap.querySelector(".flip-inner");
-  const title = back.querySelector(".back-title");
-  const meta  = back.querySelector(".back-meta");
-  const body  = back.querySelector(".back-body");
-
-  title.textContent = it.title || "";
-  meta.textContent  = `${it.author?it.author+" · ":""}${fmtDate(it.published_at)} · ${it.source}`;
-
-  // 填充正文（优先 content_html，其次 content_text）
+  const backBody = wrap.querySelector(".back-body");
   if(it.content_html){
     const tmp=document.createElement("div");
-    tmp.innerHTML=it.content_html;
-    // 安全移除 inline script/style 已在后台做，这里兜底
+    tmp.innerHTML = it.content_html;
     tmp.querySelectorAll("script,style,noscript").forEach(n=>n.remove());
-    body.appendChild(tmp);
-  } else if(it.content_text){
+    backBody.appendChild(tmp);
+  }else if(it.content_text){
     it.content_text.split(/\n{2,}/).forEach(p=>{
-      const el=document.createElement("p"); el.textContent=p.trim(); body.appendChild(el);
+      const el=document.createElement("p"); el.textContent=p.trim(); backBody.appendChild(el);
     });
-  } else {
+  }else{
     const p = document.createElement("p");
     p.className="back-meta";
     p.textContent = "暂无法站内展示全文，请打开原文查看。";
-    body.appendChild(p);
+    backBody.appendChild(p);
   }
 
-  // 交互：阅读=翻转；返回=翻回；点击原文按钮放行
-  front.querySelector('[data-action="read"]').addEventListener("click",(e)=>{
-    e.preventDefault(); wrap.classList.add("flipped");
-  });
-  back.querySelector('[data-action="back"]').addEventListener("click",(e)=>{
-    e.preventDefault(); wrap.classList.remove("flipped");
-  });
+  wrap.querySelector('[data-action="read"]').addEventListener("click",(e)=>{ e.preventDefault(); wrap.classList.add("flipped"); });
+  wrap.querySelector('[data-action="back"]').addEventListener("click",(e)=>{ e.preventDefault(); wrap.classList.remove("flipped"); });
 
   return wrap;
 }
@@ -154,31 +151,56 @@ async function rebuildFilters(){
     box.appendChild(label);
     label.querySelector("input").addEventListener("change",(e)=>{
       if(e.target.checked) state.selectedSources.add(src); else state.selectedSources.delete(src);
-      renderList();
+      state.page=1; renderList();
     });
   });
 }
 
+function renderPager(total, page, pageSize){
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const info = document.getElementById("pageInfo");
+  info.textContent = `${page} / ${pages}`;
+  const prev = document.getElementById("prevPage");
+  const next = document.getElementById("nextPage");
+  prev.disabled = (page<=1);
+  next.disabled = (page>=pages);
+  prev.onclick = ()=>{ if(state.page>1){ state.page--; renderList(); } };
+  next.onclick = ()=>{ if(state.page<pages){ state.page++; renderList(); } };
+}
+
 async function renderList(){
-  showSkeleton(10);
+  showSkeleton(Math.min(state.pageSize, 6));
   const list=document.getElementById("list");
   const data=await loadMonthData(state.selectedMonth);
   const q=(state.query||"").trim().toLowerCase();
-  const filtered=data
+
+  let filtered=data
     .filter(it=> state.selectedSources.size===0 || state.selectedSources.has(it.source))
     .filter(it=>{
       if(!q) return true;
       const hay=(it.title+" "+(it.author||"")).toLowerCase();
       return hay.includes(q);
     });
+
+  // 分页
+  const total = filtered.length;
+  const pages = Math.max(1, Math.ceil(total / state.pageSize));
+  if(state.page>pages) state.page=pages;
+  const start = (state.page-1)*state.pageSize;
+  const pageItems = filtered.slice(start, start+state.pageSize);
+
   hideSkeleton();
   list.querySelectorAll(".flippable").forEach(n=>n.remove());
-  if(filtered.length===0){
-    const empty=document.createElement("div"); empty.className="flippable";
+  if(pageItems.length===0){
+    const empty=document.createElement("div");
+    empty.className="flippable";
     empty.innerHTML=`<div class="flip-inner"><div class="flip-face flip-front"><div class="card-meta">没有结果</div></div></div>`;
-    list.appendChild(empty); return;
+    list.appendChild(empty);
+    renderPager(0, 1, state.pageSize);
+    return;
   }
-  filtered.forEach(it=>list.appendChild(buildCard(it)));
+  pageItems.forEach(it=>list.appendChild(buildCard(it)));
+  renderPager(total, state.page, state.pageSize);
 }
 
 /* 主题切换（持久化）与头部阴影 */
@@ -199,41 +221,12 @@ function bindHeaderShadow(){
   onScroll(); window.addEventListener("scroll", onScroll, { passive:true });
 }
 
-/* 控件图标与工具 */
-function injectControlIcons(){
-  const iconSearch = document.getElementById("iconSearch");
-  const iconCalendar = document.getElementById("iconCalendar");
-  const filtersToggle = document.getElementById("filtersToggle");
-  if(iconSearch)  iconSearch.innerHTML = ICONS.search;
-  if(iconCalendar)iconCalendar.innerHTML = ICONS.calendar;
-  if(filtersToggle) filtersToggle.innerHTML = ICONS.filter;
-}
-function bindControlsUtilities(){
-  const input = document.getElementById("q");
-  const clear = document.getElementById("clearSearch");
-  if(clear){
-    const updateClear = ()=>{
-      const has = !!(input.value && input.value.trim());
-      clear.style.opacity = has ? "1" : ".35";
-      clear.style.pointerEvents = has ? "auto" : "none";
-    };
-    input.addEventListener("input", ()=>{ state.query = input.value || ""; updateClear(); renderList(); });
-    clear.addEventListener("click",(e)=>{ e.preventDefault(); input.value=""; state.query=""; updateClear(); renderList(); input.focus(); });
-    updateClear();
-  }
-  const toggle = document.getElementById("filtersToggle");
-  const filters = document.getElementById("filters");
-  if(window.innerWidth < 820) filters.classList.add("collapsed");
-  if(toggle){ toggle.addEventListener("click", ()=>{ filters.classList.toggle("collapsed"); }); }
-}
-
 function bindUI(){
+  document.getElementById("q").addEventListener("input", e=>{ state.query = e.target.value || ""; state.page=1; renderList(); });
   const themeBtn = document.getElementById("themeToggle");
   if(themeBtn) themeBtn.addEventListener("click", toggleTheme);
   initTheme();
   bindHeaderShadow();
-  injectControlIcons();
-  bindControlsUtilities();
 }
 
 (async function(){
