@@ -2,7 +2,7 @@ const state = {
   index:null, months:[], selectedMonth:null,
   availableSources:[], selectedSources:new Set(),
   cache:{}, query:"",
-  page:1, pageSize:12,       // 小卡片每页更多一些
+  page:1, pageSize:12,
   currentList:[], currentIdx:-1
 };
 
@@ -16,6 +16,9 @@ function fmtDate(iso){
   const d=new Date(iso);
   try { return d.toLocaleString("zh-CN",{hour12:false,timeZone:"Asia/Shanghai"}); }
   catch { return d.toLocaleString("zh-CN",{hour12:false}); }
+}
+function debounce(fn, wait=200){
+  let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); };
 }
 
 async function loadIndex(){
@@ -75,8 +78,9 @@ function firstImageFromHtml(html){
 function buildCard(it, idx){
   const div=document.createElement("div");
   div.className="card";
+  div.dataset.idx = String(idx);
   const cover = it.cover_image || (it.content_html ? firstImageFromHtml(it.content_html) : "");
-  const thumb = cover ? `<div class="card-thumb"><img src="${escapeHtml(cover)}" alt=""></div>` : `<div class="card-thumb"></div>`;
+  const thumb = cover ? `<div class="card-thumb"><img src="${escapeHtml(cover)}" loading="lazy" decoding="async" alt=""></div>` : `<div class="card-thumb"></div>`;
   div.innerHTML = `
     ${thumb}
     <div class="card-body">
@@ -87,7 +91,6 @@ function buildCard(it, idx){
       </div>
     </div>
   `;
-  div.addEventListener("click", ()=> openReaderByIndex(idx));
   return div;
 }
 
@@ -98,17 +101,19 @@ async function rebuildFilters(){
   if(state.selectedSources.size===0) state.selectedSources = new Set(state.availableSources);
   const box=document.getElementById("filters");
   box.innerHTML="";
+  const frag=document.createDocumentFragment();
   state.availableSources.forEach(src=>{
     const id="src-"+src.replace(/\W+/g,"");
     const label=document.createElement("label");
     const checked=state.selectedSources.has(src)?"checked":"";
     label.innerHTML=`<input type="checkbox" id="${id}" ${checked}> ${escapeHtml(src)}`;
-    box.appendChild(label);
     label.querySelector("input").addEventListener("change",(e)=>{
       if(e.target.checked) state.selectedSources.add(src); else state.selectedSources.delete(src);
       state.page=1; renderList();
     });
+    frag.appendChild(label);
   });
+  box.appendChild(frag);
 }
 
 function renderPager(total, page, pageSize){
@@ -143,26 +148,26 @@ async function renderList(){
   state.currentList = filtered;
   state.currentIdx = -1;
 
-  // 分页
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total / state.pageSize));
   if(state.page>pages) state.page=pages;
   const start = (state.page-1)*state.pageSize;
   const pageItems = filtered.slice(start, start+state.pageSize);
 
+  const frag = document.createDocumentFragment();
   if(pageItems.length===0){
     const empty=document.createElement("div");
     empty.className="card";
     empty.innerHTML=`<div class="card-body"><div class="card-meta">没有结果</div></div>`;
-    list.appendChild(empty);
-    renderPager(0, 1, state.pageSize);
-    return;
+    frag.appendChild(empty);
+  } else {
+    pageItems.forEach((it, i)=> frag.appendChild(buildCard(it, start+i)));
   }
-  pageItems.forEach((it, i)=> list.appendChild(buildCard(it, start+i)));
+  list.appendChild(frag);
   renderPager(total, state.page, state.pageSize);
 }
 
-/* 阅读器（全屏大卡片） */
+/* Reader（全屏大卡片） */
 function openReaderByIndex(idx){
   if(idx<0 || idx>=state.currentList.length) return;
   state.currentIdx = idx;
@@ -177,44 +182,43 @@ function openReaderByIndex(idx){
   const hero  = document.getElementById("rd-hero");
   const body  = document.getElementById("rd-body");
 
-  title.textContent = it.title || "";
-  meta.textContent  = `${it.author?it.author+" · ":""}${fmtDate(it.published_at)} · ${it.source}`;
-  source.textContent= it.source || "";
-  stand.textContent = it.summary || "";
-  body.innerHTML = "";
+  body.innerHTML = `<p class="meta">加载中…</p>`;
+  hero.src=""; heroW.hidden=true;
 
-  const cover = it.cover_image || (it.content_html ? firstImageFromHtml(it.content_html) : "");
-  if(cover){
-    hero.src = cover;
-    heroW.hidden = false;
-  }else{
-    hero.src=""; heroW.hidden=true;
-  }
+  requestAnimationFrame(()=>{
+    title.textContent = it.title || "";
+    meta.textContent  = `${it.author?it.author+" · ":""}${fmtDate(it.published_at)} · ${it.source}`;
+    source.textContent= it.source || "";
+    stand.textContent = it.summary || "";
 
-  if(it.content_html){
-    const tmp=document.createElement("div");
-    tmp.innerHTML = it.content_html;
-    tmp.querySelectorAll("script,style,noscript").forEach(n=>n.remove());
-    body.appendChild(tmp);
-  }else if(it.content_text){
-    it.content_text.split(/\n{2,}/).forEach(p=>{
-      const el=document.createElement("p"); el.textContent=p.trim(); body.appendChild(el);
-    });
-  }else{
-    const p=document.createElement("p");
-    p.className="meta"; p.textContent="暂无法站内展示全文，请打开原文查看。";
-    const a=document.createElement("a");
-    a.href=it.url; a.target="_blank"; a.rel="noopener noreferrer"; a.textContent="原文";
-    p.appendChild(document.createTextNode(" "));
-    p.appendChild(a);
-    body.appendChild(p);
-  }
+    const cover = it.cover_image || (it.content_html ? firstImageFromHtml(it.content_html) : "");
+    if(cover){ hero.src = cover; hero.loading="lazy"; hero.decoding="async"; heroW.hidden=false; }
+
+    body.innerHTML = "";
+    if(it.content_html){
+      const tmp=document.createElement("div");
+      tmp.innerHTML = it.content_html;
+      tmp.querySelectorAll("script,style,noscript").forEach(n=>n.remove());
+      body.appendChild(tmp);
+    }else if(it.content_text){
+      it.content_text.split(/\n{2,}/).forEach(p=>{
+        const el=document.createElement("p"); el.textContent=p.trim(); body.appendChild(el);
+      });
+    }else{
+      const p=document.createElement("p");
+      p.className="meta"; p.textContent="暂无法站内展示全文，请打开原文查看。";
+      const a=document.createElement("a");
+      a.href=it.url; a.target="_blank"; a.rel="noopener noreferrer"; a.textContent="原文";
+      p.appendChild(document.createTextNode(" "));
+      p.appendChild(a);
+      body.appendChild(p);
+    }
+  });
 
   rd.classList.remove("hidden");
   document.body.style.overflow="hidden";
   updateReaderNav();
 }
-
 function closeReader(){
   const rd = document.getElementById("reader");
   rd.classList.add("hidden");
@@ -233,7 +237,7 @@ function goReader(delta){
   openReaderByIndex(idx);
 }
 
-/* 主题切换（持久化）与 ESC/方向键 */
+/* 主题 + 键盘 + 事件委托 */
 function applyTheme(t){
   document.documentElement.setAttribute("data-theme", t);
   const btn = document.getElementById("themeToggle");
@@ -251,11 +255,21 @@ function bindKeys(){
     if(e.key==="Escape" && rdOpen) closeReader();
     if(rdOpen && (e.key==="ArrowRight"||e.key==="PageDown")) goReader(1);
     if(rdOpen && (e.key==="ArrowLeft" ||e.key==="PageUp"))   goReader(-1);
-  });
+  }, { passive:true });
 }
 
 function bindUI(){
-  document.getElementById("q").addEventListener("input", e=>{ state.query = e.target.value || ""; state.page=1; renderList(); });
+  const list = document.getElementById("list");
+  list.addEventListener("click",(e)=>{
+    const card = e.target.closest(".card");
+    if(!card) return;
+    const idx = Number(card.dataset.idx || -1);
+    if(idx>=0) openReaderByIndex(idx);
+  });
+
+  const onSearch = debounce((e)=>{ state.query = e.target.value || ""; state.page=1; renderList(); }, 200);
+  document.getElementById("q").addEventListener("input", onSearch);
+
   document.getElementById("themeToggle").addEventListener("click", toggleTheme);
   document.getElementById("rd-close").addEventListener("click", closeReader);
   document.getElementById("rd-prev").addEventListener("click", ()=>goReader(-1));
@@ -263,6 +277,7 @@ function bindUI(){
   initTheme(); bindKeys();
 }
 
+/* 启动 */
 (async function(){
   bindUI();
   try{
