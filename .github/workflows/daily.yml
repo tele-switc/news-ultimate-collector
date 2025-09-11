@@ -1,8 +1,8 @@
-name: Daily fetch (CST 08:00 + fallbacks)
+name: Daily fetch (CST 08:00 + checkpoint)
 
 on:
   schedule:
-    - cron: "0 0 * * *"   # 北京时间 08:00
+    - cron: "0 0 * * *"   # 08:00 CST
     - cron: "10 0 * * *"  # 08:10
     - cron: "20 0 * * *"  # 08:20
     - cron: "30 0 * * *"  # 08:30
@@ -18,18 +18,33 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install deps
         run: pip install -r requirements.txt
-      - name: Run daily fetch (module mode)
+
+      - name: Run daily fetch (module mode, checkpoint enabled)
+        env:
+          # 软时间预算（分钟），小于上面的 timeout-minutes
+          TIME_BUDGET_MIN_DAILY: "30"
+          TIME_HEADROOM_SEC_DAILY: "70"
+          # 每抓到多少条 checkpoint 一次
+          COMMIT_EVERY_DAILY: "120"
         run: python -m scripts.fetch_daily
-      - name: Commit and push
+
+      # 兜底：若脚本已做 checkpoint，这一步可能无变更
+      - name: Final commit (best-effort)
+        if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(daily): update aggregated data"
+          commit_message: "chore(daily): final checkpoint"
           branch: main
