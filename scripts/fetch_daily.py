@@ -11,10 +11,9 @@ from scripts.utils import (
 )
 from scripts.connectors.fulltext import extract_fulltext
 
-# 默认参数（可通过 workflow env 覆盖）
 DEFAULT_COMMIT_EVERY = 120
-DEFAULT_TIME_BUDGET_MIN = 30   # 分钟
-DEFAULT_TIME_HEADROOM_SEC = 70 # 预留秒数
+DEFAULT_TIME_BUDGET_MIN = 30
+DEFAULT_TIME_HEADROOM_SEC = 70
 
 def getenv_int(name, default):
     v = os.getenv(name)
@@ -24,32 +23,27 @@ def getenv_int(name, default):
     try: return int(v)
     except: return default
 
-def getenv_float(name, default):
-    v = os.getenv(name)
-    if v is None: return default
-    v = str(v).strip()
-    if not v: return default
-    try: return float(v)
-    except: return default
-
 COMMIT_EVERY = getenv_int("COMMIT_EVERY_DAILY", DEFAULT_COMMIT_EVERY)
 TIME_BUDGET_MIN = getenv_int("TIME_BUDGET_MIN_DAILY", DEFAULT_TIME_BUDGET_MIN)
 TIME_HEADROOM_SEC = getenv_int("TIME_HEADROOM_SEC_DAILY", DEFAULT_TIME_HEADROOM_SEC)
 
 def git_checkpoint_commit(message="chore(daily): checkpoint"):
-    """在 Actions 中从脚本内部直接 git commit + push，保证进度可见"""
     try:
         if os.getenv("GITHUB_ACTIONS", "").lower() != "true":
             return
+        # 配置用户（若上游步骤未配置）
         subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
         subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+        # 仅添加数据
         subprocess.run(["git", "add", "docs/data"], check=True)
-        diff = subprocess.run(["git", "diff", "--cached", "--quiet"])
-        if diff.returncode == 0:
+        # 有变更才提交
+        if subprocess.run(["git", "diff", "--cached", "--quiet"]).returncode == 0:
             return
         ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%SZ")
         subprocess.run(["git", "commit", "-m", f"{message} @ {ts}"], check=True)
+        # push 前先拉取rebase，避免非快进
         branch = os.getenv("GITHUB_REF_NAME", "main")
+        subprocess.run(["git", "pull", "--rebase", "origin", branch], check=False)
         subprocess.run(["git", "push", "origin", branch], check=True)
         print("Daily checkpoint committed and pushed.")
     except Exception as e:
@@ -62,11 +56,10 @@ def checkpoint(dedup, note="daily-checkpoint"):
 
 def time_is_up(start_ts: float) -> bool:
     elapsed = time.monotonic() - start_ts
-    budget = max(120, TIME_BUDGET_MIN * 60)  # 至少2分钟
+    budget = max(120, TIME_BUDGET_MIN * 60)
     return elapsed >= max(60, budget - TIME_HEADROOM_SEC)
 
 def entry_time(e):
-    # 以文章发布时间为准
     for k in ("published","updated","created"):
         if k in e:
             try: return to_iso(e[k])
@@ -76,7 +69,7 @@ def entry_time(e):
             dt = getattr(e,k)
             try: return to_iso(datetime(*dt[:6], tzinfo=timezone.utc))
             except Exception: pass
-    return ""  # 避免用 now
+    return ""
 
 def try_fill_fulltext(item):
     try:
@@ -111,7 +104,6 @@ def main():
             return 0
 
         src_added = 0
-        # 1) RSS
         for rss in conf.get("rss", []):
             print(f"[{conf['display_name']}] RSS: {rss}")
             feed = feedparser.parse(rss, request_headers=HEADERS)
@@ -151,14 +143,12 @@ def main():
                     total_added += 1
                     processed_since_commit += 1
 
-                # 周期性 checkpoint
                 if processed_since_commit >= COMMIT_EVERY:
                     checkpoint(dedup, "daily-autosave")
                     processed_since_commit = 0
 
             time.sleep(0.2)
 
-        # 2) RSS 无新增 → Sitemap 兜底
         if src_added == 0 and conf.get("sitemap"):
             start_fallback_iso = to_iso(now - timedelta(hours=SITEMAP_LOOKBACK_HOURS))
             end_iso = to_iso(now)
@@ -169,8 +159,9 @@ def main():
                     checkpoint(dedup, "daily-time-budget")
                     print("Daily time budget reached mid-Sitemap. Exit with saved progress.")
                     return 0
-                if lastmod_iso < start_iso: 
+                if lastmod_iso < start_iso:
                     continue
+
                 meta = extract_meta(url)
                 title = meta.get("title","") or conf["display_name"]
                 author = meta.get("author","")
@@ -188,7 +179,6 @@ def main():
                     processed_since_commit = 0
                 time.sleep(0.1)
 
-    # 最终提交
     checkpoint(dedup, "daily-final")
     print(f"Done. New items added: {total_added}")
     return 0
