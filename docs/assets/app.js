@@ -3,7 +3,9 @@ const state = {
   availableSources:[], selectedSources:new Set(),
   cache:{}, query:"",
   page:1, pageSize:12,
-  currentList:[], currentIdx:-1
+  currentList:[], currentIdx:-1,
+  loadCtl:null,               // AbortController for month data
+  loadingMonth:false
 };
 
 function escapeHtml(s){
@@ -44,17 +46,60 @@ function renderMonthOptions(){
     sel.appendChild(opt);
   });
   if(state.selectedMonth) sel.value=state.selectedMonth;
-  sel.onchange=async()=>{ state.selectedMonth=sel.value; state.page=1; await rebuildFilters(); renderList(); };
+  sel.onchange=()=> switchMonth(sel.value);
+}
+
+function setListLoading(on){
+  const list = document.getElementById("list");
+  list.setAttribute("data-loading", on ? "1" : "0");
+  state.loadingMonth = on;
+}
+
+async function switchMonth(m){
+  if(state.loadingMonth) {
+    // 防抖：正在切换就忽略快速重复
+  }
+  state.selectedMonth = m;
+  state.page=1;
+  setListLoading(true);
+  showSkeleton(Math.min(state.pageSize, 12));
+  try{
+    await rebuildFilters();
+    await renderList();
+  }catch(e){
+    console.error(e);
+    const list=document.getElementById("list");
+    list.innerHTML=`<div class="card"><div class="card-body"><div class="card-meta">加载失败，稍后重试</div></div></div>`;
+  }finally{
+    setListLoading(false);
+  }
 }
 
 async function loadMonthData(monthKey){
   if(state.cache[monthKey]) return state.cache[monthKey];
-  const [y,m]=monthKey.split("-");
-  const r=await fetch(`./data/${y}/${m}.json`,{cache:"no-store"});
-  const data=r.ok? await r.json(): [];
-  data.sort((a,b)=> (b.published_at||"").localeCompare(a.published_at||""));
-  state.cache[monthKey]=data; 
-  return data;
+  if(state.loadCtl) state.loadCtl.abort();
+  const ctl = new AbortController();
+  state.loadCtl = ctl;
+  const [y,m] = monthKey.split("-");
+  const url = `./data/${y}/${m}.json`;
+  try{
+    const r = await fetch(url, {cache:"no-store", signal: ctl.signal});
+    let data = [];
+    if(r.ok){
+      data = await r.json();
+    }else{
+      data = []; // 该月暂无数据
+    }
+    data.sort((a,b)=> (b.published_at||"").localeCompare(a.published_at||""));
+    state.cache[monthKey] = data;
+    return data;
+  }catch(e){
+    if(e.name === "AbortError") {
+      // 被取消，返回空数组，调用方会再次调用
+      return [];
+    }
+    throw e;
+  }
 }
 
 function showSkeleton(n=12){
@@ -129,7 +174,6 @@ function renderPager(total, page, pageSize){
 }
 
 async function renderList(){
-  showSkeleton(Math.min(state.pageSize, 12));
   const list=document.getElementById("list");
   const data=await loadMonthData(state.selectedMonth);
   const q=(state.query||"").trim().toLowerCase();
@@ -182,6 +226,7 @@ function openReaderByIndex(idx){
   const hero  = document.getElementById("rd-hero");
   const body  = document.getElementById("rd-body");
 
+  // 先清空，显示轻骨架
   body.innerHTML = `<p class="meta">加载中…</p>`;
   hero.src=""; heroW.hidden=true;
 
@@ -285,6 +330,7 @@ function bindUI(){
     await rebuildFilters();
     await renderList();
   }catch(e){
+    console.error(e);
     document.getElementById("list").innerHTML=
       `<div class="card"><div class="card-body"><div class="card-meta">数据尚未生成。请先运行 Backfill 或 Daily。</div></div></div>`;
   }
