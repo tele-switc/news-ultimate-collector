@@ -25,6 +25,23 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
 
+      - name: Configure git user (for any internal commits)
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
+
+      - name: Ensure pyc are not tracked (one-time cleanup)
+        run: |
+          echo "If .gitignore is present, untrack pyc/__pycache__ once"
+          git rm -r --cached **/__pycache__ 2>/dev/null || true
+          git rm -r --cached **/*.pyc 2>/dev/null || true
+          # Create a small commit if there were staged deletions
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(repo): stop tracking pyc"
+            git pull --rebase origin "${GITHUB_REF_NAME:-main}" || true
+            git push origin "${GITHUB_REF_NAME:-main}" || true
+          fi
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -34,17 +51,21 @@ jobs:
 
       - name: Run daily fetch (module mode, checkpoint enabled)
         env:
-          # 软时间预算（分钟），小于上面的 timeout-minutes
-          TIME_BUDGET_MIN_DAILY: "30"
+          TIME_BUDGET_MIN_DAILY: "30"  # 软时间预算（分钟），必须小于 timeout-minutes
           TIME_HEADROOM_SEC_DAILY: "70"
-          # 每抓到多少条 checkpoint 一次
-          COMMIT_EVERY_DAILY: "120"
+          COMMIT_EVERY_DAILY: "120"    # 每抓到多少条 checkpoint 一次
         run: python -m scripts.fetch_daily
 
-      # 兜底：若脚本已做 checkpoint，这一步可能无变更
-      - name: Final commit (best-effort)
+      # 最终兜底提交，仅限 docs/data，且先拉取再推送，避免非快进
+      - name: Pull --rebase before final auto-commit
+        if: always()
+        run: git pull --rebase origin "${GITHUB_REF_NAME:-main}" || true
+
+      - name: Final commit (docs/data only)
         if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore(daily): final checkpoint"
           branch: main
+          file_pattern: docs/data/**
+          push_options: --force-with-lease
