@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# venv / tools
+.venv/
+env/
+venv/
+
+# OS crap
+.DS_Store
+
+# Node (如前端本地构建后用)
+node_modules/
+
+# Project data cache (如果你将来加了临时文件)
+.tmp/
